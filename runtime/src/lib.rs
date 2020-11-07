@@ -42,6 +42,8 @@ pub use frame_support::{
 /// Import the template pallet.
 pub use pallet_template;
 
+pub use pallet_abc;
+
 pub use ocw_demo;
 
 /// An index to a block.
@@ -269,6 +271,9 @@ impl pallet_template::Trait for Runtime {
 	type Event = Event;
 }
 
+impl pallet_abc::Trait for Runtime {
+	type Event = Event;
+}
 
 // ---------------------- Recipe Pallet Configurations ----------------------
 
@@ -358,6 +363,7 @@ construct_runtime!(
 		Sudo: pallet_sudo::{Module, Call, Config<T>, Storage, Event<T>},
 		// Include the custom logic from the template pallet in the runtime.
 		TemplateModule: pallet_template::{Module, Call, Storage, Event<T>},
+		Abc: pallet_abc::{Module, Call, Storage, Event<T>},
 
 		OcwDemo: ocw_demo::{Module, Call, Storage, Event<T>, ValidateUnsigned},
 	}
