@@ -35,6 +35,7 @@ use sp_std::{
 	prelude::*, str,
 	collections::vec_deque::VecDeque,
 };
+use uuid::{Builder, Uuid, Variant, Version};
 
 // We use `alt_serde`, and Xanewok-modified `serde_json` so that we can compile the program
 //   with serde(features `std`) and alt_serde(features `no_std`).
@@ -153,6 +154,8 @@ decl_storage! {
 	trait Store for Module<T: Trait> as OCW {
 		/// A vector of recently submitted numbers. Bounded by NUM_VEC_LEN
 		Numbers get(fn numbers): VecDeque<u64>;
+
+		Errand get(fn errand): u64;
 	}
 }
 
@@ -190,6 +193,12 @@ decl_error! {
 decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		fn deposit_event() = default;
+
+		#[weight = 10000]
+		pub fn add_errrand(origin, number: u64) -> DispatchResult {
+			Errand::set(number);
+			Ok(())
+		}
 
 		#[weight = 10000]
 		pub fn submit_number_signed(origin, number: u64) -> DispatchResult {
@@ -234,20 +243,24 @@ decl_module! {
 			// 2. Sending unsigned transaction from ocw
 			// 3. Sending unsigned transactions with signed payloads from ocw
 			// 4. Fetching JSON via http requests in ocw
-			const TRANSACTION_TYPES: usize = 4;
-			let result = match block_number.try_into()
-				.map_or(TRANSACTION_TYPES, |bn| bn % TRANSACTION_TYPES)
-			{
-				0 => Self::offchain_signed_tx(block_number),
-				1 => Self::offchain_unsigned_tx(block_number),
-				2 => Self::offchain_unsigned_tx_signed_payload(block_number),
-				3 => Self::fetch_github_info(),
-				_ => Err(Error::<T>::UnknownOffchainMux),
-			};
-
-			if let Err(e) = result {
-				debug::error!("offchain_worker error: {:?}", e);
-			}
+			// const TRANSACTION_TYPES: usize = 4;
+			// let result = match block_number.try_into()
+			// 	.map_or(TRANSACTION_TYPES, |bn| bn % TRANSACTION_TYPES)
+			// {
+			// 	0 => Self::offchain_signed_tx(block_number),
+			// 	1 => Self::offchain_unsigned_tx(block_number),
+			// 	2 => Self::offchain_unsigned_tx_signed_payload(block_number),
+			// 	3 => Self::fetch_github_info(),
+			// 	_ => Err(Error::<T>::UnknownOffchainMux),
+			// };
+			//
+			// if let Err(e) = result {
+			// 	debug::error!("offchain_worker error: {:?}", e);
+			// }
+			//
+			// if Self::errand() == 10 {
+			// 	Self::post_n_parse(123);
+			// }
 		}
 	}
 }
@@ -263,6 +276,80 @@ impl<T: Trait> Module<T> {
 			numbers.push_back(number);
 			debug::info!("Number vector: {:?}", numbers);
 		});
+	}
+
+	fn post_n_parse(errand_number: u128) -> Result<(), Error<T>> {
+		let resp_bytes = Self::post_errand(errand_number).map_err(|e| {
+			debug::error!("fetch_from_remote error: {:?}", e);
+			<Error<T>>::HttpFetchingError
+		})?;
+
+		let resp_str = str::from_utf8(&resp_bytes).map_err(|_| <Error<T>>::HttpFetchingError)?;
+		// Print out our fetched JSON string
+		debug::info!("{}", resp_str);
+
+		// Deserializing JSON to struct, thanks to `serde` and `serde_derive`
+		// let gh_info: GithubInfo =
+		// 	serde_json::from_str(&resp_str).map_err(|_| <Error<T>>::HttpFetchingError)?;
+		// Ok(gh_info)
+		Ok(())
+	}
+
+	fn post_errand(errand_number: u128) -> Result<Vec<u8>, Error<T>> {
+		let uuid = Builder::from_u128(errand_number)
+			.set_variant(Variant::RFC4122)
+			.set_version(Version::Random)
+			.build();
+		let mut buf = Uuid::encode_buffer();
+		let uuid = uuid.to_hyphenated()
+			.encode_lower(&mut buf);
+		debug::info!("my_uuid {}", uuid);
+		// let http_remote = format!(
+		// 	"http://81.68.250.243:8000/api/service/5GBykvvrUz3vwTttgHzUEPdm7G1FND1reBfddQLdiaCbhoMd/{}/0x14fd87f46da9cd46750b93ba1aec47dc37ceb132dc97fa2b932bc9938a6cb9306a1fb070926ce9a3ade8ea6b49e51794741de6551daedf6ded090b94691d1c8b",
+		// 	uuid);
+		let http_remote = "http://81.68.250.243:8000/api/service/5GBykvvrUz3vwTttgHzUEPdm7G1FND1reBfddQLdiaCbhoMd/{}/0x14fd87f46da9cd46750b93ba1aec47dc37ceb132dc97fa2b932bc9938a6cb9306a1fb070926ce9a3ade8ea6b49e51794741de6551daedf6ded090b94691d1c8b";
+		let post_body = vec![b"QmYjxScxSCo4WyYbeReuVjJkvGtuKfxYE8hpvUfmcEsr2w"];
+
+		// debug::info!("sending request to: {}", http_remote);
+
+		// Initiate an external HTTP GET request. This is using high-level wrappers from `sp_runtime`.
+		let request = rt_offchain::http::Request::post(&http_remote, post_body);
+
+		// Keeping the offchain worker execution time reasonable, so limiting the call to be within 3s.
+		let timeout = sp_io::offchain::timestamp()
+			.add(rt_offchain::Duration::from_millis(FETCH_TIMEOUT_PERIOD));
+
+		// For github API request, we also need to specify `user-agent` in http request header.
+		//   See: https://developer.github.com/v3/#user-agent-required
+		let pending = request
+			.add_header("User-Agent", HTTP_HEADER_USER_AGENT)
+			.deadline(timeout) // Setting the timeout time
+			.send() // Sending the request out by the host
+			.map_err(|_| <Error<T>>::HttpFetchingError)?;
+
+		// let pending = rt_offchain::http::Request::default()
+		// 	.method(rt_offchain::http::Method::Post)
+		// 	.url("http://localhost:1234")
+		// 	.body(vec![b"1234"])
+		// 	.send()
+		// 	.unwrap();
+
+		// By default, the http request is async from the runtime perspective. So we are asking the
+		//   runtime to wait here.
+		// The returning value here is a `Result` of `Result`, so we are unwrapping it twice by two `?`
+		//   ref: https://substrate.dev/rustdocs/v2.0.0/sp_runtime/offchain/http/struct.PendingRequest.html#method.try_wait
+		let response = pending
+			.try_wait(timeout)
+			.map_err(|_| <Error<T>>::HttpFetchingError)?
+			.map_err(|_| <Error<T>>::HttpFetchingError)?;
+
+		// if response.code != 200 {
+		// 	debug::error!("Unexpected http request status code: {}", response.code);
+		// 	return Err(<Error<T>>::HttpFetchingError);
+		// }
+
+		// Next we fully read the response body and collect it to a vector of bytes.
+		Ok(response.body().collect::<Vec<u8>>())
 	}
 
 	/// Check if we have fetched github info before. If yes, we can use the cached version
