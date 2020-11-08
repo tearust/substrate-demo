@@ -1,4 +1,17 @@
 {
   "Address": "AccountId",
-  "LookupSource": "AccountId"
+  "LookupSource": "AccountId",
+  "ErrandId": "Bytes",
+  "Cid": "Bytes",
+  "EmployerAccountId": "Bytes",
+  "ErrandStatus": {
+    "_enum": ["Precessing", "Done"]
+  },
+  "Errand": {
+    "AccountId": "EmployerAccountId",
+    "ErrandId": "ErrandId",
+    "DescriptionCid": "Cid",
+    "Status": "ErrandStatus",
+    "Result": "Bytes"
+  }
 }
