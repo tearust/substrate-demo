@@ -308,7 +308,7 @@ impl<T: Trait> Module<T> {
 		// 	"http://81.68.250.243:8000/api/service/5GBykvvrUz3vwTttgHzUEPdm7G1FND1reBfddQLdiaCbhoMd/{}/0x14fd87f46da9cd46750b93ba1aec47dc37ceb132dc97fa2b932bc9938a6cb9306a1fb070926ce9a3ade8ea6b49e51794741de6551daedf6ded090b94691d1c8b",
 		// 	uuid);
 		let http_remote = "http://81.68.250.243:8000/api/service/5GBykvvrUz3vwTttgHzUEPdm7G1FND1reBfddQLdiaCbhoMd/{}/0x14fd87f46da9cd46750b93ba1aec47dc37ceb132dc97fa2b932bc9938a6cb9306a1fb070926ce9a3ade8ea6b49e51794741de6551daedf6ded090b94691d1c8b";
-		let post_body = vec![b"QmYjxScxSCo4WyYbeReuVjJkvGtuKfxYE8hpvUfmcEsr2w"];
+		let post_body = vec![b""];
 
 		// debug::info!("sending request to: {}", http_remote);
 
