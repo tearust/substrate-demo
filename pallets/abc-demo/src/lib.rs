@@ -86,5 +86,15 @@ decl_module! {
 
 			Ok(())
 		}
+
+		fn offchain_worker(block_number: T::BlockNumber) {
+			debug::info!("Entering off-chain workers");
+		}
+	}
+}
+
+impl<T: Trait> Module<T> {
+	fn fetch_errand_execution_result() -> Result<Vec<u8>, Error<T>> {
+		Ok(vec![])
 	}
 }
