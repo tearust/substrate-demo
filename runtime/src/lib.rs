@@ -282,7 +282,6 @@ impl pallet_abc::Trait for Runtime {
 pub type SignedPayload = generic::SignedPayload<Call, SignedExtra>;
 
 impl ocw_demo::Trait for Runtime {
-	type AuthorityId = ocw_demo::crypto::TestAuthId;
 	type Call = Call;
 	type Event = Event;
 }
@@ -365,7 +364,7 @@ construct_runtime!(
 		TemplateModule: pallet_template::{Module, Call, Storage, Event<T>},
 		Abc: pallet_abc::{Module, Call, Storage, Event<T>},
 
-		OcwDemo: ocw_demo::{Module, Call, Storage, Event<T>, ValidateUnsigned},
+		OcwDemo: ocw_demo::{Module, Call, Storage, Event<T>},
 	}
 );
 
