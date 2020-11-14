@@ -7,7 +7,9 @@ use frame_support::{
     IterableStorageMap, StorageMap, StorageValue,
 };
 use frame_system::ensure_signed;
+use sp_io::hashing::blake2_128;
 use sp_std::prelude::*;
+use uuid::{Builder, Uuid, Variant, Version};
 
 #[cfg(test)]
 mod mock;
@@ -107,6 +109,21 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
+    fn generate_errand_id(sender: &T::AccountId) -> Vec<u8> {
+        let payload = (
+            <pallet_randomness_collective_flip::Module<T> as Randomness<T::Hash>>::random_seed(),
+            &sender,
+            <frame_system::Module<T>>::extrinsic_index(),
+        );
+        let uuid = Builder::from_bytes(payload.using_encoded(blake2_128))
+            .set_variant(Variant::RFC4122)
+            .set_version(Version::Random)
+            .build();
+        let mut buf = Uuid::encode_buffer();
+        let uuid = uuid.to_hyphenated().encode_lower(&mut buf);
+        uuid.as_bytes().to_vec()
+    }
+
     fn fetch_errand_execution_result() -> Result<Vec<u8>, Error<T>> {
         Ok(vec![])
     }
