@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::{Decode, Encode};
+// todo enable ReservableCurrency later
+// use frame_support::traits::ReservableCurrency;
 use frame_support::{
     debug, decl_error, decl_event, decl_module, decl_storage, dispatch, ensure,
     traits::{Currency, ExistenceRequirement, Get, Imbalance, Randomness},
@@ -18,6 +20,8 @@ mod mock;
 mod tests;
 
 pub trait Trait: frame_system::Trait {
+    // todo enable ReservableCurrency later
+    // type Currency: ReservableCurrency<Self::AccountId>;
     type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 }
 
@@ -48,7 +52,7 @@ decl_storage! {
             map hasher(twox_64_concat) ErrandId => Option<Errand>;
 
         Tasks get(fn tasks):
-            map hasher(blake2_128_concat) T::BlockNumber => Vec<(Cid, Option<ErrandId>)>;
+            map hasher(blake2_128_concat) T::BlockNumber => Vec<(T::AccountId, Cid, ErrandId, u32)>;
     }
 }
 
@@ -65,6 +69,7 @@ decl_error! {
     pub enum Error for Module<T: Trait> {
         NoneValue,
         StorageOverflow,
+        InsufficientFee,
     }
 }
 
@@ -77,8 +82,25 @@ decl_module! {
         #[weight = 10_000]
         pub fn begin_task(origin,
             description_cid: Cid,
+            fee: u32,
             ) -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
+
+            // todo enable fee
+            // reserve fee for commit errand delegator
+            // ensure!(fee > 0, Error::<T>::InsufficientFee);
+            // T::Currency::reserve(&sender, fee.into())?;
+
+            let errand_id = Self::generate_errand_id(&sender);
+            let block_number = frame_system::Module::<T>::block_number();
+            if Tasks::<T>::contains_key(&block_number) {
+                let mut task_array = Tasks::<T>::take(&block_number);
+                task_array.push((sender, description_cid, errand_id, fee));
+                Tasks::<T>::insert(&block_number, task_array);
+            } else {
+                Tasks::<T>::insert(&block_number, vec![(sender, description_cid, errand_id, fee)]);
+            }
+
             Ok(())
         }
 
