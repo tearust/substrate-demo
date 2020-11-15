@@ -44,8 +44,6 @@ pub use pallet_template;
 
 pub use pallet_abc;
 
-pub use ocw_demo;
-
 /// An index to a block.
 pub type BlockNumber = u32;
 
@@ -281,11 +279,6 @@ impl pallet_abc::Trait for Runtime {
 ///   inside `create_transaction` function.
 pub type SignedPayload = generic::SignedPayload<Call, SignedExtra>;
 
-impl ocw_demo::Trait for Runtime {
-	type Call = Call;
-	type Event = Event;
-}
-
 impl<LocalCall> frame_system::offchain::CreateSignedTransaction<LocalCall> for Runtime
 	where
 		Call: From<LocalCall>,
@@ -363,8 +356,6 @@ construct_runtime!(
 		// Include the custom logic from the template pallet in the runtime.
 		TemplateModule: pallet_template::{Module, Call, Storage, Event<T>},
 		Abc: pallet_abc::{Module, Call, Storage, Event<T>},
-
-		OcwDemo: ocw_demo::{Module, Call, Storage, Event<T>},
 	}
 );
 
