@@ -16,3 +16,18 @@ services:
         source: ./docker/.local
         target: /root/.local
     command: bash -c "cargo build --release --target-dir /tearust/substrate-demo/docker/target"
+  utest:
+    container_name: unit-test
+    image: paritytech/ci-linux:staging-1.47.0
+    working_dir: /tearust/substrate-demo
+    ports:
+      - "9944:9944"
+    environment:
+      - CARGO_HOME=/tearust/.cargo
+      - WASM_BUILD_TOOLCHAIN=nightly-2020-10-01
+    volumes:
+      - ..:/tearust
+      - type: bind
+        source: ./docker/.local
+        target: /root/.local
+    command: bash -c "RUST_BACKTRACE=1 cargo test -p pallet-abc --target-dir /tearust/substrate-demo/docker/target"
