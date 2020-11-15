@@ -19,6 +19,8 @@ fn generate_errand_id_test() {
 
 #[test]
 fn begin_task_works() {
+    let a = vec![1];
+    for i in a.iter() {}
     new_test_ext().execute_with(|| {
         // set block number to 1
         let block_number = 1;

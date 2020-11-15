@@ -7,7 +7,11 @@ use frame_support::{
     debug, decl_error, decl_event, decl_module, decl_storage, dispatch, traits::Randomness,
     StorageMap,
 };
-use frame_system::ensure_signed;
+use frame_system::{
+    ensure_signed,
+    offchain::{AppCrypto, CreateSignedTransaction, SendSignedTransaction, Signer, ForAll},
+};
+use sp_core::crypto::KeyTypeId;
 use sp_io::hashing::blake2_128;
 use sp_std::prelude::*;
 use uuid::{Builder, Uuid, Variant, Version};
@@ -18,10 +22,45 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
-pub trait Trait: frame_system::Trait {
+pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
+
+pub mod crypto {
+    use crate::KEY_TYPE;
+    use sp_core::sr25519::Signature as Sr25519Signature;
+    use sp_runtime::{
+        app_crypto::{app_crypto, sr25519},
+        traits::Verify,
+        MultiSignature, MultiSigner,
+    };
+
+    app_crypto!(sr25519, KEY_TYPE);
+
+    pub struct AuthId;
+
+    // implemented for ocw-runtime
+    impl frame_system::offchain::AppCrypto<MultiSigner, MultiSignature> for AuthId {
+        type RuntimeAppPublic = Public;
+        type GenericSignature = sp_core::sr25519::Signature;
+        type GenericPublic = sp_core::sr25519::Public;
+    }
+
+    // implemented for mock runtime in test
+    impl frame_system::offchain::AppCrypto<<Sr25519Signature as Verify>::Signer, Sr25519Signature>
+    for AuthId
+    {
+        type RuntimeAppPublic = Public;
+        type GenericSignature = sp_core::sr25519::Signature;
+        type GenericPublic = sp_core::sr25519::Public;
+    }
+}
+
+pub trait Trait: frame_system::Trait + CreateSignedTransaction<Call<Self>> {
     // todo enable ReservableCurrency later
     // type Currency: ReservableCurrency<Self::AccountId>;
     type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
+
+    type AuthorityId: AppCrypto<Self::Public, Self::Signature>;
+    type Call: From<Call<Self>>;
 }
 
 type EmployerAccountId = Vec<u8>;
@@ -104,14 +143,17 @@ decl_module! {
         }
 
         #[weight = 10_000]
-        pub fn commit_errand(origin,
+        pub fn init_errand(origin,
+            employer: T::AccountId,
             errand_id: ErrandId,
             description_cid: Cid,
             ) -> dispatch::DispatchResult {
 
-            let sender = ensure_signed(origin)?;
+            let _sender = ensure_signed(origin)?;
+            // todo ensure sender has right to init errand tasks
+
             let errand = Errand {
-                account_id: sender.encode(),
+                account_id: employer.encode(),
                 errand_id: errand_id.clone(),
                 description_cid,
                 status: ErrandStatus::Precessing,
@@ -125,6 +167,8 @@ decl_module! {
 
         fn offchain_worker(block_number: T::BlockNumber) {
             debug::info!("Entering off-chain workers");
+
+            Self::send_errand_tasks();
         }
     }
 }
@@ -143,5 +187,40 @@ impl<T: Trait> Module<T> {
         let mut buf = Uuid::encode_buffer();
         let uuid = uuid.to_hyphenated().encode_lower(&mut buf);
         uuid.as_bytes().to_vec()
+    }
+
+    fn send_errand_tasks() {
+        let current_height = frame_system::Module::<T>::block_number();
+        if !Tasks::<T>::contains_key(&current_height) {
+            debug::info!("height {:?} has no tasks, just return", &current_height);
+            return;
+        }
+
+        let signer = Signer::<T, T::AuthorityId>::all_accounts();
+        if !signer.can_sign() {
+            debug::info!("No local account available");
+            return;
+        }
+        // todo ensure signer has rights to init errand tasks
+
+        let task_array = Tasks::<T>::get(&current_height);
+        for item in task_array.iter() {
+            Self::init_single_errand_task(&signer, &item.0, &item.1, &item.2);
+        }
+    }
+
+    fn init_single_errand_task(
+        signer: &Signer<T, T::AuthorityId, ForAll>,
+        sender: &T::AccountId,
+        description_cid: &Cid,
+        errand_id: &ErrandId,
+    ) {
+        let result = signer.send_signed_transaction(|_acct| {
+            Call::init_errand(sender.clone(), errand_id.clone(), description_cid.clone())
+        });
+
+        for (_acc, err) in &result {
+            debug::error!("init errand {:?} error: {:?}", errand_id, err);
+        }
     }
 }
