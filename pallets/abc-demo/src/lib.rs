@@ -4,9 +4,8 @@ use codec::{Decode, Encode};
 // todo enable ReservableCurrency later
 // use frame_support::traits::ReservableCurrency;
 use frame_support::{
-    debug, decl_error, decl_event, decl_module, decl_storage, dispatch, ensure,
-    traits::{Currency, ExistenceRequirement, Get, Imbalance, Randomness},
-    IterableStorageMap, StorageMap, StorageValue,
+    debug, decl_error, decl_event, decl_module, decl_storage, dispatch, traits::Randomness,
+    StorageMap,
 };
 use frame_system::ensure_signed;
 use sp_io::hashing::blake2_128;
@@ -144,9 +143,5 @@ impl<T: Trait> Module<T> {
         let mut buf = Uuid::encode_buffer();
         let uuid = uuid.to_hyphenated().encode_lower(&mut buf);
         uuid.as_bytes().to_vec()
-    }
-
-    fn fetch_errand_execution_result() -> Result<Vec<u8>, Error<T>> {
-        Ok(vec![])
     }
 }
