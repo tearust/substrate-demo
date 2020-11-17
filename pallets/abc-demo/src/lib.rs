@@ -25,6 +25,8 @@ mod mock;
 mod tests;
 
 pub const SERVICE_BASE_URL: &'static str = "http://localhost:8000";
+pub const SEND_ERRAND_TASK_ACTION: &'static str = "/api/service";
+
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
 pub const TEA_SEND_TASK_TIMEOUT_PERIOD: u64 = 3000;
 
@@ -245,20 +247,18 @@ impl<T: Trait> Module<T> {
         description_cid: &Cid,
         errand_id: &ErrandId,
     ) -> Result<(), Error<T>> {
-        let service = Self::new_errand_service(description_cid, errand_id);
+        // todo set real account and proof_of_delegate later
         let request_url = [
             SERVICE_BASE_URL,
-            str::from_utf8(&service.action).map_err(|_| Error::<T>::SendErrandTaskError)?,
+            SEND_ERRAND_TASK_ACTION,
             "/",
-            str::from_utf8(&service.account).map_err(|_| Error::<T>::SendErrandTaskError)?,
+            "5GBykvvrUz3vwTttgHzUEPdm7G1FND1reBfddQLdiaCbhoMd",
             "/",
-            str::from_utf8(&service.errand_id).map_err(|_| Error::<T>::SendErrandTaskError)?,
+            str::from_utf8(&errand_id).map_err(|_| Error::<T>::SendErrandTaskError)?,
             "/",
-            str::from_utf8(&service.proof_of_delegate)
-                .map_err(|_| Error::<T>::SendErrandTaskError)?,
+            "0x14fd87f46da9cd46750b93ba1aec47dc37ceb132dc97fa2b932bc9938a6cb9306a1fb070926ce9a3ade8ea6b49e51794741de6551daedf6ded090b94691d1c8b",
             "?content=",
-            str::from_utf8(&service.description_cid)
-                .map_err(|_| Error::<T>::SendErrandTaskError)?,
+            str::from_utf8(&description_cid).map_err(|_| Error::<T>::SendErrandTaskError)?,
         ]
         .concat();
         let post_body = vec![b""];
@@ -281,16 +281,5 @@ impl<T: Trait> Module<T> {
         }
 
         Ok(())
-    }
-
-    fn new_errand_service(description_cid: &Cid, errand_id: &ErrandId) -> ErrandService {
-        // todo set real account and proof_of_delegate later
-        ErrandService {
-            action: b"/api/service".to_vec(),
-            account: b"5GBykvvrUz3vwTttgHzUEPdm7G1FND1reBfddQLdiaCbhoMd".to_vec(),
-            proof_of_delegate: b"0x14fd87f46da9cd46750b93ba1aec47dc37ceb132dc97fa2b932bc9938a6cb9306a1fb070926ce9a3ade8ea6b49e51794741de6551daedf6ded090b94691d1c8b".to_vec(),
-            errand_id: errand_id.to_vec(),
-            description_cid: description_cid.to_vec(),
-        }
     }
 }
