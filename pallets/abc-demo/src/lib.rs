@@ -141,7 +141,7 @@ decl_storage! {
     trait Store for Module<T: Trait> as Abc {
         // todo change key to cid
         Errands get(fn errand):
-            map hasher(twox_64_concat) ErrandId => Option<Errand>;
+            map hasher(twox_64_concat) Cid => Option<Errand>;
 
         Tasks get(fn tasks):
             map hasher(blake2_128_concat) T::BlockNumber => Vec<TaskInfo>;
@@ -168,6 +168,7 @@ decl_error! {
         SendErrandTaskError,
         QueryErrandResultError,
         ResponseParsingError,
+        ErrandAlreadyExecuted,
         ErrandTaskNotExist,
         ApplyDelegateError,
         LocalStorageError,
@@ -212,6 +213,8 @@ decl_module! {
             // ensure!(fee > 0, Error::<T>::InsufficientFee);
             // T::Currency::reserve(&sender, fee.into())?;
 
+            ensure!(!Errands::<T>::contains_key(&description_cid), Error::<T>::ErrandAlreadyExecuted);
+
             let errand_id = Self::generate_errand_id(&sender);
             let task_info = TaskInfo {
                 employer: employer.encode(),
@@ -224,6 +227,10 @@ decl_module! {
             let block_number = frame_system::Module::<T>::block_number();
             if Tasks::<T>::contains_key(&block_number) {
                 let mut task_array = Tasks::<T>::take(&block_number);
+
+                for task in task_array.iter() {
+                    ensure!(!Errands::<T>::contains_key(&task.description_cid), Error::<T>::ErrandAlreadyExecuted);
+                }
                 task_array.push(task_info);
                 Tasks::<T>::insert(&block_number, task_array);
             } else {
@@ -258,15 +265,15 @@ decl_module! {
 
         #[weight = 10_000]
         pub fn update_errand(origin,
-            errand_id: ErrandId,
+            description_cid: Cid,
             result: Vec<u8>,
             ) -> dispatch::DispatchResult {
             let _sender = ensure_signed(origin)?;
             // todo ensure sender has right to init errand tasks
 
-            ensure!(Errands::contains_key(&errand_id), Error::<T>::ErrandTaskNotExist);
+            ensure!(Errands::contains_key(&description_cid), Error::<T>::ErrandTaskNotExist);
 
-            Errands::mutate(&errand_id, |val| {
+            Errands::mutate(&description_cid, |val| {
                 if let Some(errand) = val {
                     errand.status = ErrandStatus::Done;
                     errand.result = result;
@@ -458,6 +465,7 @@ impl<T: Trait> Module<T> {
     fn try_update_single_errand(
         signer: &Signer<T, T::AuthorityId, ForAll>,
         errand_id: &ErrandId,
+        description_cid: &Cid,
     ) -> Result<(), Error<T>> {
         let resp_bytes = Self::query_single_task_result(errand_id).map_err(|e| {
             debug::error!("query_result_from_http error: {:?}", e);
@@ -473,7 +481,7 @@ impl<T: Trait> Module<T> {
         }
 
         let result = signer.send_signed_transaction(|_acct| {
-            Call::update_errand(errand_id.clone(), result_info.result_cid.clone())
+            Call::update_errand(description_cid.clone(), result_info.result_cid.clone())
         });
 
         for (_acc, err) in &result {
