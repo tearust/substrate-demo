@@ -3,9 +3,11 @@
 use codec::{Decode, Encode};
 // todo enable ReservableCurrency later
 // use frame_support::traits::ReservableCurrency;
+use alt_serde::{Deserialize, Deserializer};
+use core::convert::TryInto;
 use frame_support::{
-    debug, decl_error, decl_event, decl_module, decl_storage, dispatch, traits::Randomness,
-    StorageMap,
+    debug, decl_error, decl_event, decl_module, decl_storage, dispatch, ensure, traits::Randomness,
+    IterableStorageMap, StorageMap,
 };
 use frame_system::{
     ensure_signed,
@@ -26,6 +28,7 @@ mod tests;
 
 pub const SERVICE_BASE_URL: &'static str = "http://localhost:8000";
 pub const SEND_ERRAND_TASK_ACTION: &'static str = "/api/service";
+pub const QUERY_ERRAND_RESULT_ACTION: &'static str = "/api/query_errand_execution_result_by_uuid";
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
 pub const TEA_SEND_TASK_TIMEOUT_PERIOD: u64 = 3000;
@@ -83,6 +86,23 @@ pub struct ErrandService {
     pub description_cid: Vec<u8>,
 }
 
+#[serde(crate = "alt_serde")]
+#[derive(Encode, Decode, Deserialize)]
+struct ErrandResultInfo {
+    completed: bool,
+    #[serde(deserialize_with = "de_string_to_bytes")]
+    result_cid: Vec<u8>,
+    failed_count: u32,
+}
+
+pub fn de_string_to_bytes<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: &str = Deserialize::deserialize(de)?;
+    Ok(s.as_bytes().to_vec())
+}
+
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
 enum ErrandStatus {
     Precessing,
@@ -100,6 +120,7 @@ pub struct Errand {
 
 decl_storage! {
     trait Store for Module<T: Trait> as Abc {
+        // todo change key to cid
         Errands get(fn errand):
             map hasher(twox_64_concat) ErrandId => Option<Errand>;
 
@@ -123,6 +144,9 @@ decl_error! {
         StorageOverflow,
         InsufficientFee,
         SendErrandTaskError,
+        QueryErrandResultError,
+        ResponseParsingError,
+        ErrandTaskNotExist,
     }
 }
 
@@ -180,10 +204,31 @@ decl_module! {
             Ok(())
         }
 
+        #[weight = 10_000]
+        pub fn update_errand(origin,
+            errand_id: ErrandId,
+            result: Vec<u8>,
+            ) -> dispatch::DispatchResult {
+            let _sender = ensure_signed(origin)?;
+            // todo ensure sender has right to init errand tasks
+
+            ensure!(Errands::contains_key(&errand_id), Error::<T>::ErrandTaskNotExist);
+
+            Errands::mutate(&errand_id, |val| {
+                if let Some(errand) = val {
+                    errand.status = ErrandStatus::Done;
+                    errand.result = result;
+                }
+            });
+
+            Ok(())
+        }
+
         fn offchain_worker(block_number: T::BlockNumber) {
             debug::info!("Entering off-chain workers");
 
             Self::send_errand_tasks();
+            Self::query_errand_task_results(block_number);
         }
     }
 }
@@ -226,6 +271,81 @@ impl<T: Trait> Module<T> {
             }
             Self::init_single_errand_task(&signer, &item.0, &item.1, &item.2);
         }
+    }
+
+    fn query_errand_task_results(block_number: T::BlockNumber) {
+        // query every 10 block (about 1 minute)
+        let height: u64 = block_number.try_into().ok().unwrap() as u64;
+        if height % 10 != 0 {
+            return;
+        }
+
+        let signer = Signer::<T, T::AuthorityId>::all_accounts();
+        if !signer.can_sign() {
+            debug::info!("No local account available");
+            return;
+        }
+        // todo ensure signer has rights to init errand tasks
+
+        // todo iterator use IterableStorageMap
+        // for item in Errands::<T>::iter() {}
+    }
+
+    fn try_update_single_errand(
+        signer: &Signer<T, T::AuthorityId, ForAll>,
+        errand_id: &ErrandId,
+    ) -> Result<(), Error<T>> {
+        let resp_bytes = Self::query_single_task_result(errand_id).map_err(|e| {
+            debug::error!("query_result_from_http error: {:?}", e);
+            Error::<T>::QueryErrandResultError
+        })?;
+
+        let resp_str = str::from_utf8(&resp_bytes).map_err(|_| Error::<T>::ResponseParsingError)?;
+        let result_info: ErrandResultInfo = serde_json::from_str::<ErrandResultInfo>(resp_str)
+            .map_err(|_| Error::<T>::ResponseParsingError)?;
+
+        if !result_info.completed {
+            return Ok(());
+        }
+
+        let result = signer.send_signed_transaction(|_acct| {
+            Call::update_errand(errand_id.clone(), result_info.result_cid.clone())
+        });
+
+        for (_acc, err) in &result {
+            debug::error!("init errand {:?} error: {:?}", errand_id, err);
+        }
+        Ok(())
+    }
+
+    fn query_single_task_result(errand_id: &ErrandId) -> Result<Vec<u8>, Error<T>> {
+        let request_url = [
+            SERVICE_BASE_URL,
+            QUERY_ERRAND_RESULT_ACTION,
+            "/",
+            str::from_utf8(&errand_id).map_err(|_| Error::<T>::QueryErrandResultError)?,
+        ]
+        .concat();
+        let post_body = vec![b""];
+
+        let request = rt_offchain::http::Request::post(&request_url, post_body);
+        let timeout = sp_io::offchain::timestamp().add(rt_offchain::Duration::from_millis(3000));
+        let pending = request
+            .deadline(timeout)
+            .send()
+            .map_err(|_| Error::<T>::QueryErrandResultError)?;
+
+        let response = pending
+            .try_wait(timeout)
+            .map_err(|_| Error::<T>::QueryErrandResultError)?
+            .map_err(|_| Error::<T>::QueryErrandResultError)?;
+
+        if response.code != 200 {
+            debug::error!("Unexpected http request status code: {}", response.code);
+            return Err(<Error<T>>::QueryErrandResultError);
+        }
+
+        Ok(response.body().collect::<Vec<u8>>())
     }
 
     fn init_single_errand_task(
