@@ -142,10 +142,12 @@ decl_storage! {
         Errands get(fn errand):
             map hasher(twox_64_concat) Cid => Option<Errand>;
 
+        Employers get(fn employers): map hasher(blake2_128_concat) T::AccountId => bool;
+
         Tasks get(fn tasks):
             map hasher(blake2_128_concat) T::BlockNumber => Vec<TaskInfo>;
 
-        DelegateEmployers get(fn delegate_accounts):
+        EmployersApplys get(fn delegate_accounts):
             map hasher(blake2_128_concat) T::BlockNumber => Vec<(T::AccountId, T::AccountId)>;
 
         ProcessingErrands get(fn processing_errands): Vec<Cid>;
@@ -174,6 +176,9 @@ decl_error! {
         ApplyDelegateError,
         LocalStorageError,
         LocalStorageAlreadyFetched,
+        EmployerAlreadyExists,
+        EmployerNotExist,
+        EmployerNotReady,
     }
 }
 
@@ -189,15 +194,34 @@ decl_module! {
         ) -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
 
-            let block_number = frame_system::Module::<T>::block_number();
-            if DelegateEmployers::<T>::contains_key(&block_number) {
-                let mut accounts = DelegateEmployers::<T>::take(&block_number);
-                accounts.push((employer, sender));
-                DelegateEmployers::<T>::insert(&block_number, accounts);
-            } else {
-                DelegateEmployers::<T>::insert(&block_number, vec![(employer, sender)]);
-            }
+            ensure!(!Employers::<T>::contains_key(&employer), Error::<T>::EmployerAlreadyExists);
 
+            let block_number = frame_system::Module::<T>::block_number();
+            if EmployersApplys::<T>::contains_key(&block_number) {
+                let mut accounts = EmployersApplys::<T>::take(&block_number);
+                accounts.push((employer.clone(), sender));
+                EmployersApplys::<T>::insert(&block_number, accounts);
+            } else {
+                EmployersApplys::<T>::insert(&block_number, vec![(employer.clone(), sender)]);
+            }
+            Employers::<T>::insert(&employer, false);
+
+            Ok(())
+        }
+
+        #[weight = 10_000]
+        pub fn update_delegate_status(origin,
+            employer: T::AccountId,
+        ) -> dispatch::DispatchResult {
+            let _sender = ensure_signed(origin)?;
+
+            // todo ensure sender has rights to update delegate status
+
+            ensure!(Employers::<T>::contains_key(&employer), Error::<T>::EmployerNotExist);
+
+            Employers::<T>::mutate(&employer, |val| {
+                *val = true;
+            });
             Ok(())
         }
 
@@ -214,6 +238,8 @@ decl_module! {
             // ensure!(fee > 0, Error::<T>::InsufficientFee);
             // T::Currency::reserve(&sender, fee.into())?;
 
+            ensure!(Employers::<T>::contains_key(&employer), Error::<T>::EmployerNotExist);
+            ensure!(Employers::<T>::get(&employer), Error::<T>::EmployerNotReady);
             ensure!(!Errands::contains_key(&description_cid), Error::<T>::ErrandAlreadyExecuted);
 
             let errand_id = Self::generate_errand_id(&sender);
@@ -325,11 +351,17 @@ impl<T: Trait> Module<T> {
             return;
         }
 
-        let accounts = DelegateEmployers::<T>::get(&current_height);
+        let accounts = EmployersApplys::<T>::get(&current_height);
         for acc in accounts.iter() {
             // todo ensure signer has rights to init errand tasks
             if let Err(e) = Self::apply_single_delegate(&acc.0) {
                 debug::error!("apply_single_delegate error: {:?}", e);
+            }
+            let result =
+                signer.send_signed_transaction(|_acct| Call::update_delegate_status(acc.0.clone()));
+
+            for (_acc, err) in &result {
+                debug::error!("apply delegate {:?} error: {:?}", &acc.0, err);
             }
         }
     }
@@ -493,7 +525,7 @@ impl<T: Trait> Module<T> {
         });
 
         for (_acc, err) in &result {
-            debug::error!("init errand {:?} error: {:?}", errand_id, err);
+            debug::error!("try update single errand {:?} error: {:?}", errand_id, err);
         }
         Ok(())
     }
