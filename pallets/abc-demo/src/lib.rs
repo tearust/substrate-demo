@@ -77,18 +77,11 @@ pub trait Trait: frame_system::Trait + CreateSignedTransaction<Call<Self>> {
 }
 
 type EmployerAccountId = Vec<u8>;
+type SenderAccountId = Vec<u8>;
 
 type ErrandId = Vec<u8>;
 
 type Cid = Vec<u8>;
-
-pub struct ErrandService {
-    pub action: Vec<u8>,
-    pub account: Vec<u8>,
-    pub proof_of_delegate: Vec<u8>,
-    pub errand_id: ErrandId,
-    pub description_cid: Vec<u8>,
-}
 
 #[serde(crate = "alt_serde")]
 #[derive(Encode, Decode, Deserialize)]
@@ -135,6 +128,15 @@ pub struct Errand {
     result: Vec<u8>,
 }
 
+#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
+pub struct TaskInfo {
+    employer: EmployerAccountId,
+    sender: SenderAccountId,
+    description_cid: Cid,
+    errand_id: ErrandId,
+    fee: u32,
+}
+
 decl_storage! {
     trait Store for Module<T: Trait> as Abc {
         // todo change key to cid
@@ -142,7 +144,7 @@ decl_storage! {
             map hasher(twox_64_concat) ErrandId => Option<Errand>;
 
         Tasks get(fn tasks):
-            map hasher(blake2_128_concat) T::BlockNumber => Vec<(T::AccountId, Cid, ErrandId, u32)>;
+            map hasher(blake2_128_concat) T::BlockNumber => Vec<TaskInfo>;
 
         DelegateEmployers get(fn delegate_accounts):
             map hasher(blake2_128_concat) T::BlockNumber => Vec<(T::AccountId, T::AccountId)>;
@@ -168,6 +170,7 @@ decl_error! {
         ResponseParsingError,
         ErrandTaskNotExist,
         ApplyDelegateError,
+        LocalStorageError,
         LocalStorageAlreadyFetched,
     }
 }
@@ -198,6 +201,7 @@ decl_module! {
 
         #[weight = 10_000]
         pub fn begin_task(origin,
+            employer: T::AccountId,
             description_cid: Cid,
             fee: u32,
             ) -> dispatch::DispatchResult {
@@ -209,13 +213,21 @@ decl_module! {
             // T::Currency::reserve(&sender, fee.into())?;
 
             let errand_id = Self::generate_errand_id(&sender);
+            let task_info = TaskInfo {
+                employer: employer.encode(),
+                sender: sender.encode(),
+                description_cid,
+                errand_id,
+                fee,
+            };
+
             let block_number = frame_system::Module::<T>::block_number();
             if Tasks::<T>::contains_key(&block_number) {
                 let mut task_array = Tasks::<T>::take(&block_number);
-                task_array.push((sender, description_cid, errand_id, fee));
+                task_array.push(task_info);
                 Tasks::<T>::insert(&block_number, task_array);
             } else {
-                Tasks::<T>::insert(&block_number, vec![(sender, description_cid, errand_id, fee)]);
+                Tasks::<T>::insert(&block_number, vec![task_info]);
             }
 
             Ok(())
@@ -325,14 +337,30 @@ impl<T: Trait> Module<T> {
             return;
         }
         // todo ensure signer has rights to init errand tasks
-
         let task_array = Tasks::<T>::get(&current_height);
         for item in task_array.iter() {
-            if let Err(e) = Self::send_task_to_tea_network(&item.1, &item.2) {
-                debug::error!("send_task_to_tea_network error: {:?}", e);
-                continue;
+            match str::from_utf8(&item.employer) {
+                Ok(employer) => {
+                    if let Err(e) = Self::send_task_to_tea_network(
+                        employer,
+                        &item.description_cid,
+                        &item.errand_id,
+                    ) {
+                        debug::error!("send_task_to_tea_network error: {:?}", e);
+                        continue;
+                    }
+
+                    // todo decode sender from item.sender
+                    let sender: T::AccountId = T::AccountId::default();
+                    Self::init_single_errand_task(
+                        &signer,
+                        &sender,
+                        &item.description_cid,
+                        &item.errand_id,
+                    );
+                }
+                Err(e) => debug::error!("convert employer to str error: {:?}", e),
             }
-            Self::init_single_errand_task(&signer, &item.0, &item.1, &item.2);
         }
     }
 
@@ -353,12 +381,15 @@ impl<T: Trait> Module<T> {
         Self::save_delegate_info(
             str::from_utf8(&employer.encode()).map_err(|_| Error::<T>::ApplyDelegateError)?,
             &result_info,
-        );
+        )?;
 
         Ok(())
     }
 
-    fn save_delegate_info(employer: &str, delegate_info: &DelegateInfo) -> Result<(), Error<T>> {
+    fn operate_local_storage<F, R>(employer: &str, mut callback: F) -> Result<R, Error<T>>
+    where
+        F: FnMut(StorageValueRef) -> R,
+    {
         let key = [LOCAL_STORAGE_EMPLOYER_KEY_PREFIX, employer]
             .concat()
             .as_bytes()
@@ -382,12 +413,28 @@ impl<T: Trait> Module<T> {
             }
         })?;
 
-        if let Ok(true) = res {
-            value_ref.set(delegate_info);
-            lock.set(&false);
+        match res {
+            Ok(true) => {
+                let rtn = callback(value_ref);
+                lock.set(&false);
+                Ok(rtn)
+            }
+            _ => Err(Error::<T>::LocalStorageError),
         }
+    }
 
-        Ok(())
+    fn save_delegate_info(employer: &str, delegate_info: &DelegateInfo) -> Result<(), Error<T>> {
+        Self::operate_local_storage(employer, |value_ref| {
+            value_ref.set(delegate_info);
+            ()
+        })
+    }
+
+    fn load_delegate_info(employer: &str) -> Result<DelegateInfo, Error<T>> {
+        match Self::operate_local_storage(employer, |value_ref| value_ref.get::<DelegateInfo>()) {
+            Ok(Some(Some(info))) => Ok(info),
+            _ => Err(Error::<T>::LocalStorageError),
+        }
     }
 
     fn query_errand_task_results(block_number: T::BlockNumber) {
@@ -462,19 +509,21 @@ impl<T: Trait> Module<T> {
     }
 
     fn send_task_to_tea_network(
+        employer: &str,
         description_cid: &Cid,
         errand_id: &ErrandId,
     ) -> Result<(), Error<T>> {
-        // todo set real account and proof_of_delegate later
+        let info: DelegateInfo = Self::load_delegate_info(employer)?;
         let request_url = [
             SERVICE_BASE_URL,
             SEND_ERRAND_TASK_ACTION,
             "/",
-            "5GBykvvrUz3vwTttgHzUEPdm7G1FND1reBfddQLdiaCbhoMd",
+            employer,
             "/",
             str::from_utf8(&errand_id).map_err(|_| Error::<T>::SendErrandTaskError)?,
             "/",
-            "0x14fd87f46da9cd46750b93ba1aec47dc37ceb132dc97fa2b932bc9938a6cb9306a1fb070926ce9a3ade8ea6b49e51794741de6551daedf6ded090b94691d1c8b",
+            // todo convert signature to hex string
+            str::from_utf8(&info.sig).map_err(|_| Error::<T>::SendErrandTaskError)?,
             "?content=",
             str::from_utf8(&description_cid).map_err(|_| Error::<T>::SendErrandTaskError)?,
         ]
