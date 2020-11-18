@@ -115,7 +115,7 @@ where
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
 enum ErrandStatus {
-    Precessing,
+    Processing,
     Done,
 }
 
@@ -139,7 +139,6 @@ pub struct TaskInfo {
 
 decl_storage! {
     trait Store for Module<T: Trait> as Abc {
-        // todo change key to cid
         Errands get(fn errand):
             map hasher(twox_64_concat) Cid => Option<Errand>;
 
@@ -148,6 +147,8 @@ decl_storage! {
 
         DelegateEmployers get(fn delegate_accounts):
             map hasher(blake2_128_concat) T::BlockNumber => Vec<(T::AccountId, T::AccountId)>;
+
+        ProcessingErrands get(fn processing_errands): Vec<Cid>;
     }
 }
 
@@ -213,13 +214,13 @@ decl_module! {
             // ensure!(fee > 0, Error::<T>::InsufficientFee);
             // T::Currency::reserve(&sender, fee.into())?;
 
-            ensure!(!Errands::<T>::contains_key(&description_cid), Error::<T>::ErrandAlreadyExecuted);
+            ensure!(!Errands::contains_key(&description_cid), Error::<T>::ErrandAlreadyExecuted);
 
             let errand_id = Self::generate_errand_id(&sender);
             let task_info = TaskInfo {
                 employer: employer.encode(),
                 sender: sender.encode(),
-                description_cid,
+                description_cid: description_cid.clone(),
                 errand_id,
                 fee,
             };
@@ -229,13 +230,14 @@ decl_module! {
                 let mut task_array = Tasks::<T>::take(&block_number);
 
                 for task in task_array.iter() {
-                    ensure!(!Errands::<T>::contains_key(&task.description_cid), Error::<T>::ErrandAlreadyExecuted);
+                    ensure!(!Errands::contains_key(&task.description_cid), Error::<T>::ErrandAlreadyExecuted);
                 }
                 task_array.push(task_info);
                 Tasks::<T>::insert(&block_number, task_array);
             } else {
                 Tasks::<T>::insert(&block_number, vec![task_info]);
             }
+            Self::add_processing(description_cid);
 
             Ok(())
         }
@@ -254,7 +256,7 @@ decl_module! {
                 account_id: employer.encode(),
                 errand_id: errand_id.clone(),
                 description_cid,
-                status: ErrandStatus::Precessing,
+                status: ErrandStatus::Processing,
                 result: Vec::new(),
             };
             Errands::insert(errand_id, errand);
@@ -279,6 +281,7 @@ decl_module! {
                     errand.result = result;
                 }
             });
+            Self::remove_processing(&description_cid);
 
             Ok(())
         }
@@ -458,8 +461,13 @@ impl<T: Trait> Module<T> {
         }
         // todo ensure signer has rights to init errand tasks
 
-        // todo iterator use IterableStorageMap
-        // for item in Errands::<T>::iter() {}
+        let processing_errands: Vec<Cid> = ProcessingErrands::get();
+        for item in processing_errands {
+            let errand: Errand = Errands::get(&item).unwrap();
+            if let Err(e) = Self::try_update_single_errand(&signer, &errand.errand_id, &item) {
+                debug::error!("try_update_single_errand execute error: {:?}", e);
+            }
+        }
     }
 
     fn try_update_single_errand(
@@ -539,6 +547,18 @@ impl<T: Trait> Module<T> {
         Self::http_post(&request_url)?;
 
         Ok(())
+    }
+
+    fn add_processing(description_cid: Cid) {
+        let mut errands: Vec<Cid> = ProcessingErrands::get();
+        errands.push(description_cid);
+        ProcessingErrands::put(errands);
+    }
+
+    fn remove_processing(description_cid: &Cid) {
+        let mut errands: Vec<Cid> = ProcessingErrands::get();
+        errands.retain(|item| !item.eq(description_cid));
+        ProcessingErrands::put(errands);
     }
 
     fn http_post(url: &str) -> Result<Vec<u8>, Error<T>> {
