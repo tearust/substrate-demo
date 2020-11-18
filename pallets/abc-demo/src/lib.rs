@@ -7,7 +7,7 @@ use alt_serde::{Deserialize, Deserializer};
 use core::convert::TryInto;
 use frame_support::{
     debug, decl_error, decl_event, decl_module, decl_storage, dispatch, ensure, traits::Randomness,
-    IterableStorageMap, StorageMap,
+    StorageMap,
 };
 use frame_system::{
     ensure_signed,
@@ -29,6 +29,7 @@ mod tests;
 pub const SERVICE_BASE_URL: &'static str = "http://localhost:8000";
 pub const SEND_ERRAND_TASK_ACTION: &'static str = "/api/service";
 pub const QUERY_ERRAND_RESULT_ACTION: &'static str = "/api/query_errand_execution_result_by_uuid";
+pub const APPLY_DELEGATE: &'static str = "/api/be_my_delegate";
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
 pub const TEA_SEND_TASK_TIMEOUT_PERIOD: u64 = 3000;
@@ -95,6 +96,19 @@ struct ErrandResultInfo {
     failed_count: u32,
 }
 
+#[serde(crate = "alt_serde")]
+#[derive(Encode, Decode, Deserialize)]
+struct DelegateInfo {
+    #[serde(deserialize_with = "de_string_to_bytes")]
+    delegator_tea_id: Vec<u8>,
+    #[serde(deserialize_with = "de_string_to_bytes")]
+    delegator_ephemeral_id: Vec<u8>,
+    #[serde(deserialize_with = "de_string_to_bytes")]
+    sig: Vec<u8>,
+    #[serde(deserialize_with = "de_string_to_bytes")]
+    key3_rsa_pub_key: Vec<u8>,
+}
+
 pub fn de_string_to_bytes<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
 where
     D: Deserializer<'de>,
@@ -126,6 +140,9 @@ decl_storage! {
 
         Tasks get(fn tasks):
             map hasher(blake2_128_concat) T::BlockNumber => Vec<(T::AccountId, Cid, ErrandId, u32)>;
+
+        DelegateEmployers get(fn delegate_accounts):
+            map hasher(blake2_128_concat) T::BlockNumber => Vec<(T::AccountId, T::AccountId)>;
     }
 }
 
@@ -147,6 +164,7 @@ decl_error! {
         QueryErrandResultError,
         ResponseParsingError,
         ErrandTaskNotExist,
+        ApplyDelegateError,
     }
 }
 
@@ -155,6 +173,24 @@ decl_module! {
         type Error = Error<T>;
 
         fn deposit_event() = default;
+
+        #[weight = 10_000]
+        pub fn request_delegate(origin,
+            employer: T::AccountId,
+        ) -> dispatch::DispatchResult {
+            let sender = ensure_signed(origin)?;
+
+            let block_number = frame_system::Module::<T>::block_number();
+            if DelegateEmployers::<T>::contains_key(&block_number) {
+                let mut accounts = DelegateEmployers::<T>::take(&block_number);
+                accounts.push((employer, sender));
+                DelegateEmployers::<T>::insert(&block_number, accounts);
+            } else {
+                DelegateEmployers::<T>::insert(&block_number, vec![(employer, sender)]);
+            }
+
+            Ok(())
+        }
 
         #[weight = 10_000]
         pub fn begin_task(origin,
@@ -227,6 +263,7 @@ decl_module! {
         fn offchain_worker(block_number: T::BlockNumber) {
             debug::info!("Entering off-chain workers");
 
+            Self::apply_delegates();
             Self::send_errand_tasks();
             Self::query_errand_task_results(block_number);
         }
@@ -247,6 +284,28 @@ impl<T: Trait> Module<T> {
         let mut buf = Uuid::encode_buffer();
         let uuid = uuid.to_hyphenated().encode_lower(&mut buf);
         uuid.as_bytes().to_vec()
+    }
+
+    fn apply_delegates() {
+        let current_height = frame_system::Module::<T>::block_number();
+        if !Tasks::<T>::contains_key(&current_height) {
+            debug::info!("height {:?} has no delegates, just return", &current_height);
+            return;
+        }
+
+        let signer = Signer::<T, T::AuthorityId>::all_accounts();
+        if !signer.can_sign() {
+            debug::info!("No local account available");
+            return;
+        }
+
+        let accounts = DelegateEmployers::<T>::get(&current_height);
+        for acc in accounts.iter() {
+            // todo ensure signer has rights to init errand tasks
+            if let Err(e) = Self::apply_single_delegate(&acc.0, &signer) {
+                debug::error!("apply_single_delegate error: {:?}", e);
+            }
+        }
     }
 
     fn send_errand_tasks() {
@@ -271,6 +330,28 @@ impl<T: Trait> Module<T> {
             }
             Self::init_single_errand_task(&signer, &item.0, &item.1, &item.2);
         }
+    }
+
+    fn apply_single_delegate(
+        delegator: &T::AccountId,
+        signer: &Signer<T, T::AuthorityId, ForAll>,
+    ) -> Result<(), Error<T>> {
+        let request_url = [
+            SERVICE_BASE_URL,
+            APPLY_DELEGATE,
+            "?content=",
+            str::from_utf8(&delegator.encode()).map_err(|_| Error::<T>::ApplyDelegateError)?,
+        ]
+        .concat();
+
+        let resp = Self::http_post(&request_url)?;
+        let resp_str = str::from_utf8(&resp).map_err(|_| Error::<T>::ResponseParsingError)?;
+        let result_info: DelegateInfo = serde_json::from_str::<DelegateInfo>(resp_str)
+            .map_err(|_| Error::<T>::ResponseParsingError)?;
+
+        // todo use local storage to store value
+
+        Ok(())
     }
 
     fn query_errand_task_results(block_number: T::BlockNumber) {
@@ -326,26 +407,7 @@ impl<T: Trait> Module<T> {
             str::from_utf8(&errand_id).map_err(|_| Error::<T>::QueryErrandResultError)?,
         ]
         .concat();
-        let post_body = vec![b""];
-
-        let request = rt_offchain::http::Request::post(&request_url, post_body);
-        let timeout = sp_io::offchain::timestamp().add(rt_offchain::Duration::from_millis(3000));
-        let pending = request
-            .deadline(timeout)
-            .send()
-            .map_err(|_| Error::<T>::QueryErrandResultError)?;
-
-        let response = pending
-            .try_wait(timeout)
-            .map_err(|_| Error::<T>::QueryErrandResultError)?
-            .map_err(|_| Error::<T>::QueryErrandResultError)?;
-
-        if response.code != 200 {
-            debug::error!("Unexpected http request status code: {}", response.code);
-            return Err(<Error<T>>::QueryErrandResultError);
-        }
-
-        Ok(response.body().collect::<Vec<u8>>())
+        Self::http_post(&request_url)
     }
 
     fn init_single_errand_task(
@@ -381,9 +443,15 @@ impl<T: Trait> Module<T> {
             str::from_utf8(&description_cid).map_err(|_| Error::<T>::SendErrandTaskError)?,
         ]
         .concat();
+        Self::http_post(&request_url)?;
+
+        Ok(())
+    }
+
+    fn http_post(url: &str) -> Result<Vec<u8>, Error<T>> {
         let post_body = vec![b""];
 
-        let request = rt_offchain::http::Request::post(&request_url, post_body);
+        let request = rt_offchain::http::Request::post(url, post_body);
         let timeout = sp_io::offchain::timestamp().add(rt_offchain::Duration::from_millis(3000));
         let pending = request
             .deadline(timeout)
@@ -400,6 +468,6 @@ impl<T: Trait> Module<T> {
             return Err(<Error<T>>::SendErrandTaskError);
         }
 
-        Ok(())
+        Ok(response.body().collect::<Vec<u8>>())
     }
 }
