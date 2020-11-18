@@ -15,7 +15,7 @@ use frame_system::{
 };
 use sp_core::crypto::KeyTypeId;
 use sp_io::hashing::blake2_128;
-use sp_runtime::offchain as rt_offchain;
+use sp_runtime::offchain::{self as rt_offchain, storage::StorageValueRef};
 use sp_std::prelude::*;
 use sp_std::str;
 use uuid::{Builder, Uuid, Variant, Version};
@@ -33,6 +33,9 @@ pub const APPLY_DELEGATE: &'static str = "/api/be_my_delegate";
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
 pub const TEA_SEND_TASK_TIMEOUT_PERIOD: u64 = 3000;
+
+pub const LOCAL_STORAGE_EMPLOYER_KEY_PREFIX: &'static str = "local-storage::employer-";
+pub const LOCAL_STORAGE_EMPLOYER_LOCK_PREFIX: &'static str = "local-storage::employer-lock-";
 
 pub mod crypto {
     use crate::KEY_TYPE;
@@ -165,6 +168,7 @@ decl_error! {
         ResponseParsingError,
         ErrandTaskNotExist,
         ApplyDelegateError,
+        LocalStorageAlreadyFetched,
     }
 }
 
@@ -302,7 +306,7 @@ impl<T: Trait> Module<T> {
         let accounts = DelegateEmployers::<T>::get(&current_height);
         for acc in accounts.iter() {
             // todo ensure signer has rights to init errand tasks
-            if let Err(e) = Self::apply_single_delegate(&acc.0, &signer) {
+            if let Err(e) = Self::apply_single_delegate(&acc.0) {
                 debug::error!("apply_single_delegate error: {:?}", e);
             }
         }
@@ -332,15 +336,12 @@ impl<T: Trait> Module<T> {
         }
     }
 
-    fn apply_single_delegate(
-        delegator: &T::AccountId,
-        signer: &Signer<T, T::AuthorityId, ForAll>,
-    ) -> Result<(), Error<T>> {
+    fn apply_single_delegate(employer: &T::AccountId) -> Result<(), Error<T>> {
         let request_url = [
             SERVICE_BASE_URL,
             APPLY_DELEGATE,
             "?content=",
-            str::from_utf8(&delegator.encode()).map_err(|_| Error::<T>::ApplyDelegateError)?,
+            str::from_utf8(&employer.encode()).map_err(|_| Error::<T>::ApplyDelegateError)?,
         ]
         .concat();
 
@@ -349,7 +350,42 @@ impl<T: Trait> Module<T> {
         let result_info: DelegateInfo = serde_json::from_str::<DelegateInfo>(resp_str)
             .map_err(|_| Error::<T>::ResponseParsingError)?;
 
-        // todo use local storage to store value
+        Self::save_delegate_info(
+            str::from_utf8(&employer.encode()).map_err(|_| Error::<T>::ApplyDelegateError)?,
+            &result_info,
+        );
+
+        Ok(())
+    }
+
+    fn save_delegate_info(employer: &str, delegate_info: &DelegateInfo) -> Result<(), Error<T>> {
+        let key = [LOCAL_STORAGE_EMPLOYER_KEY_PREFIX, employer]
+            .concat()
+            .as_bytes()
+            .to_vec();
+        let lock_key = [LOCAL_STORAGE_EMPLOYER_LOCK_PREFIX, employer]
+            .concat()
+            .as_bytes()
+            .to_vec();
+        let value_ref = StorageValueRef::persistent(&key);
+        let lock = StorageValueRef::persistent(&lock_key);
+
+        let res: Result<bool, bool> = lock.mutate(|s: Option<Option<bool>>| {
+            match s {
+                // `s` can be one of the following:
+                //   `None`: the lock has never been set. Treated as the lock is free
+                //   `Some(None)`: unexpected case, treated it as AlreadyFetch
+                //   `Some(Some(false))`: the lock is free
+                //   `Some(Some(true))`: the lock is held
+                None | Some(Some(false)) => Ok(true),
+                _ => Err(Error::<T>::LocalStorageAlreadyFetched),
+            }
+        })?;
+
+        if let Ok(true) = res {
+            value_ref.set(delegate_info);
+            lock.set(&false);
+        }
 
         Ok(())
     }
