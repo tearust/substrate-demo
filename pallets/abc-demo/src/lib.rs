@@ -317,8 +317,8 @@ decl_module! {
         fn offchain_worker(block_number: T::BlockNumber) {
             debug::info!("Entering off-chain workers");
 
-            Self::apply_delegates();
-            Self::send_errand_tasks();
+            Self::apply_delegates(block_number);
+            Self::send_errand_tasks(block_number);
             Self::query_errand_task_results(block_number);
         }
     }
@@ -340,10 +340,9 @@ impl<T: Trait> Module<T> {
         uuid.as_bytes().to_vec()
     }
 
-    fn apply_delegates() {
-        let current_height = frame_system::Module::<T>::block_number();
-        if !Tasks::<T>::contains_key(&current_height) {
-            debug::info!("height {:?} has no delegates, just return", &current_height);
+    fn apply_delegates(block_number: T::BlockNumber) {
+        if !Tasks::<T>::contains_key(&block_number) {
+            debug::info!("height {:?} has no delegates, just return", &block_number);
             return;
         }
 
@@ -353,7 +352,7 @@ impl<T: Trait> Module<T> {
             return;
         }
 
-        let accounts = EmployersApplys::<T>::get(&current_height);
+        let accounts = EmployersApplys::<T>::get(&block_number);
         for acc in accounts.iter() {
             // todo ensure signer has rights to init errand tasks
             if let Err(e) = Self::apply_single_delegate(&acc.0) {
@@ -370,10 +369,9 @@ impl<T: Trait> Module<T> {
         }
     }
 
-    fn send_errand_tasks() {
-        let current_height = frame_system::Module::<T>::block_number();
-        if !Tasks::<T>::contains_key(&current_height) {
-            debug::info!("height {:?} has no tasks, just return", &current_height);
+    fn send_errand_tasks(block_number: T::BlockNumber) {
+        if !Tasks::<T>::contains_key(&block_number) {
+            debug::info!("height {:?} has no tasks, just return", &block_number);
             return;
         }
 
@@ -383,7 +381,7 @@ impl<T: Trait> Module<T> {
             return;
         }
         // todo ensure signer has rights to init errand tasks
-        let task_array = Tasks::<T>::get(&current_height);
+        let task_array = Tasks::<T>::get(&block_number);
         for item in task_array.iter() {
             match str::from_utf8(&item.employer) {
                 Ok(employer) => {
