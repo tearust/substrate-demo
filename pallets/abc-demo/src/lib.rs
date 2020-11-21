@@ -159,6 +159,7 @@ decl_event!(
     where
         AccountId = <T as frame_system::Trait>::AccountId,
     {
+        // todo add events
         ErrandSended(AccountId, Errand),
     }
 );
@@ -179,6 +180,7 @@ decl_error! {
         EmployerAlreadyExists,
         EmployerNotExist,
         EmployerNotReady,
+        NoRightToUpdateDelegate,
     }
 }
 
@@ -212,11 +214,11 @@ decl_module! {
         #[weight = 10_000]
         pub fn update_delegate_status(origin,
             employer: T::AccountId,
+            updater: T::AccountId,
         ) -> dispatch::DispatchResult {
-            let _sender = ensure_signed(origin)?;
+            let sender = ensure_signed(origin)?;
 
-            // todo ensure sender has rights to update delegate status
-
+            ensure!(sender == updater, Error::<T>::NoRightToUpdateDelegate);
             ensure!(Employers::<T>::contains_key(&employer), Error::<T>::EmployerNotExist);
 
             Employers::<T>::mutate(&employer, |val| {
@@ -356,9 +358,11 @@ impl<T: Trait> Module<T> {
             // todo ensure signer has rights to init errand tasks
             if let Err(e) = Self::apply_single_delegate(&acc.0) {
                 debug::error!("apply_single_delegate error: {:?}", e);
+                continue;
             }
-            let result =
-                signer.send_signed_transaction(|_acct| Call::update_delegate_status(acc.0.clone()));
+            let result = signer.send_signed_transaction(|_acct| {
+                Call::update_delegate_status(acc.0.clone(), acc.1.clone())
+            });
 
             for (_acc, err) in &result {
                 debug::error!("apply delegate {:?} error: {:?}", &acc.0, err);
