@@ -15,7 +15,7 @@ use frame_system::{
 };
 use sp_core::crypto::{AccountId32, KeyTypeId};
 use sp_io::hashing::blake2_128;
-use sp_runtime::offchain::{self as rt_offchain, storage::StorageValueRef};
+use sp_runtime::offchain::{self as rt_offchain};
 use sp_std::prelude::*;
 use sp_std::str;
 use uuid::{Builder, Uuid, Variant, Version};
@@ -32,6 +32,8 @@ mod delegate;
 mod error;
 #[cfg(feature = "std")]
 mod http;
+#[cfg(feature = "std")]
+mod task;
 
 pub const SERVICE_BASE_URL: &'static str = "http://localhost:8000";
 pub const SEND_ERRAND_TASK_ACTION: &'static str = "/api/service";
@@ -40,9 +42,6 @@ pub const APPLY_DELEGATE: &'static str = "/api/be_my_delegate";
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
 pub const TEA_SEND_TASK_TIMEOUT_PERIOD: u64 = 3000;
-
-pub const LOCAL_STORAGE_EMPLOYER_KEY_PREFIX: &'static str = "local-storage::employer-";
-pub const LOCAL_STORAGE_EMPLOYER_LOCK_PREFIX: &'static str = "local-storage::employer-lock-";
 
 pub mod crypto {
     use crate::KEY_TYPE;
@@ -99,20 +98,7 @@ struct ErrandResultInfo {
     failed_count: u32,
 }
 
-#[serde(crate = "alt_serde")]
-#[derive(Encode, Decode, Deserialize)]
-struct DelegateInfo {
-    #[serde(deserialize_with = "de_string_to_bytes")]
-    delegator_tea_id: Vec<u8>,
-    #[serde(deserialize_with = "de_string_to_bytes")]
-    delegator_ephemeral_id: Vec<u8>,
-    #[serde(deserialize_with = "de_string_to_bytes")]
-    sig: Vec<u8>,
-    #[serde(deserialize_with = "de_string_to_bytes")]
-    key3_rsa_pub_key: Vec<u8>,
-}
-
-pub fn de_string_to_bytes<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
+fn de_string_to_bytes<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -183,8 +169,6 @@ decl_error! {
         ErrandAlreadyExecuted,
         ErrandTaskNotExist,
         ApplyDelegateError,
-        LocalStorageError,
-        LocalStorageAlreadyFetched,
         EmployerAlreadyExists,
         EmployerNotExist,
         EmployerNotReady,
@@ -395,12 +379,12 @@ impl<T: Trait> Module<T> {
         for item in task_array.iter() {
             match str::from_utf8(&item.employer) {
                 Ok(employer) => {
-                    if let Err(e) = Self::send_task_to_tea_network(
+                    #[cfg(feature = "std")]
+                    if task::send_task_to_tea_network(
                         employer,
                         &item.description_cid,
                         &item.errand_id,
                     ) {
-                        debug::error!("send_task_to_tea_network error: {:?}", e);
                         continue;
                     }
 
@@ -424,57 +408,6 @@ impl<T: Trait> Module<T> {
         delegate::request_single_delegate(account);
 
         Ok(())
-    }
-
-    fn operate_local_storage<F, R>(employer: &str, mut callback: F) -> Result<R, Error<T>>
-    where
-        F: FnMut(StorageValueRef) -> R,
-    {
-        let key = [LOCAL_STORAGE_EMPLOYER_KEY_PREFIX, employer]
-            .concat()
-            .as_bytes()
-            .to_vec();
-        let lock_key = [LOCAL_STORAGE_EMPLOYER_LOCK_PREFIX, employer]
-            .concat()
-            .as_bytes()
-            .to_vec();
-        let value_ref = StorageValueRef::persistent(&key);
-        let lock = StorageValueRef::persistent(&lock_key);
-
-        let res: Result<bool, bool> = lock.mutate(|s: Option<Option<bool>>| {
-            match s {
-                // `s` can be one of the following:
-                //   `None`: the lock has never been set. Treated as the lock is free
-                //   `Some(None)`: unexpected case, treated it as AlreadyFetch
-                //   `Some(Some(false))`: the lock is free
-                //   `Some(Some(true))`: the lock is held
-                None | Some(Some(false)) => Ok(true),
-                _ => Err(Error::<T>::LocalStorageAlreadyFetched),
-            }
-        })?;
-
-        match res {
-            Ok(true) => {
-                let rtn = callback(value_ref);
-                lock.set(&false);
-                Ok(rtn)
-            }
-            _ => Err(Error::<T>::LocalStorageError),
-        }
-    }
-
-    fn save_delegate_info(employer: &str, delegate_info: &DelegateInfo) -> Result<(), Error<T>> {
-        Self::operate_local_storage(employer, |value_ref| {
-            value_ref.set(delegate_info);
-            ()
-        })
-    }
-
-    fn load_delegate_info(employer: &str) -> Result<DelegateInfo, Error<T>> {
-        match Self::operate_local_storage(employer, |value_ref| value_ref.get::<DelegateInfo>()) {
-            Ok(Some(Some(info))) => Ok(info),
-            _ => Err(Error::<T>::LocalStorageError),
-        }
     }
 
     fn query_errand_task_results(block_number: T::BlockNumber) {
@@ -552,31 +485,6 @@ impl<T: Trait> Module<T> {
         for (_acc, err) in &result {
             debug::error!("init errand {:?} error: {:?}", errand_id, err);
         }
-    }
-
-    fn send_task_to_tea_network(
-        employer: &str,
-        description_cid: &Cid,
-        errand_id: &ErrandId,
-    ) -> Result<(), Error<T>> {
-        let info: DelegateInfo = Self::load_delegate_info(employer)?;
-        let request_url = [
-            SERVICE_BASE_URL,
-            SEND_ERRAND_TASK_ACTION,
-            "/",
-            employer,
-            "/",
-            str::from_utf8(&errand_id).map_err(|_| Error::<T>::SendErrandTaskError)?,
-            "/",
-            // todo convert signature to hex string
-            str::from_utf8(&info.sig).map_err(|_| Error::<T>::SendErrandTaskError)?,
-            "?content=",
-            str::from_utf8(&description_cid).map_err(|_| Error::<T>::SendErrandTaskError)?,
-        ]
-        .concat();
-        Self::http_post(&request_url)?;
-
-        Ok(())
     }
 
     fn add_processing(description_cid: Cid) {
