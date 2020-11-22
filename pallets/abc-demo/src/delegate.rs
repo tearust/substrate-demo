@@ -1,10 +1,12 @@
 use crate::error::AbcError;
-use crate::{APPLY_DELEGATE, SERVICE_BASE_URL};
-use alt_serde::{Deserialize, Deserializer};
+use crate::storage::operate_local_storage;
+use crate::{de_string_to_bytes, SERVICE_BASE_URL};
+use alt_serde::Deserialize;
 use codec::{Decode, Encode};
 use frame_support::debug;
 use sp_core::crypto::AccountId32;
-use sp_runtime::offchain::storage::StorageValueRef;
+
+const APPLY_DELEGATE: &'static str = "/api/be_my_delegate";
 
 const LOCAL_STORAGE_EMPLOYER_KEY_PREFIX: &'static str = "local-storage::employer-";
 const LOCAL_STORAGE_EMPLOYER_LOCK_PREFIX: &'static str = "local-storage::employer-lock-";
@@ -20,14 +22,6 @@ pub struct DelegateInfo {
     pub sig: Vec<u8>,
     #[serde(deserialize_with = "de_string_to_bytes")]
     pub key3_rsa_pub_key: Vec<u8>,
-}
-
-pub fn de_string_to_bytes<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: &str = Deserialize::deserialize(de)?;
-    Ok(s.as_bytes().to_vec())
 }
 
 pub fn request_single_delegate(account: AccountId32) {
@@ -56,28 +50,6 @@ fn parse_delegate_response(resp: Vec<u8>, employer: &str) -> anyhow::Result<()> 
 }
 
 fn save_delegate_info(employer: &str, delegate_info: &DelegateInfo) -> anyhow::Result<()> {
-    operate_local_storage(employer, |value_ref| {
-        value_ref.set(delegate_info);
-        ()
-    })
-}
-
-pub fn load_delegate_info(employer: &str) -> anyhow::Result<DelegateInfo> {
-    match operate_local_storage(employer, |value_ref| value_ref.get::<DelegateInfo>()) {
-        Ok(Some(Some(info))) => Ok(info),
-        Err(e) => Err(anyhow::anyhow!(
-            "get local storage about {} error, details: {}",
-            employer,
-            e
-        )),
-        _ => Err(anyhow::anyhow!("get local storage about {} error")),
-    }
-}
-
-fn operate_local_storage<F, R>(employer: &str, mut callback: F) -> anyhow::Result<R>
-where
-    F: FnMut(StorageValueRef) -> R,
-{
     let key = [LOCAL_STORAGE_EMPLOYER_KEY_PREFIX, employer]
         .concat()
         .as_bytes()
@@ -86,33 +58,28 @@ where
         .concat()
         .as_bytes()
         .to_vec();
-    let value_ref = StorageValueRef::persistent(&key);
-    let lock = StorageValueRef::persistent(&lock_key);
+    operate_local_storage(key, lock_key, |value_ref| {
+        value_ref.set(delegate_info);
+        ()
+    })
+}
 
-    let res: Result<bool, bool> = lock.mutate(|s: Option<Option<bool>>| {
-        match s {
-            // `s` can be one of the following:
-            //   `None`: the lock has never been set. Treated as the lock is free
-            //   `Some(None)`: unexpected case, treated it as AlreadyFetch
-            //   `Some(Some(false))`: the lock is free
-            //   `Some(Some(true))`: the lock is held
-            None | Some(Some(false)) => Ok(true),
-            _ => Err(anyhow::anyhow!(
-                "local storage key {} locked",
-                String::from_utf8(key.clone())?
-            )),
-        }
-    })?;
-
-    match res {
-        Ok(true) => {
-            let rtn = callback(value_ref);
-            lock.set(&false);
-            Ok(rtn)
-        }
-        _ => Err(anyhow::anyhow!(
-            "local storage key {} lock error",
-            String::from_utf8(key)?
+pub fn load_delegate_info(employer: &str) -> anyhow::Result<DelegateInfo> {
+    let key = [LOCAL_STORAGE_EMPLOYER_KEY_PREFIX, employer]
+        .concat()
+        .as_bytes()
+        .to_vec();
+    let lock_key = [LOCAL_STORAGE_EMPLOYER_LOCK_PREFIX, employer]
+        .concat()
+        .as_bytes()
+        .to_vec();
+    match operate_local_storage(key, lock_key, |value_ref| value_ref.get::<DelegateInfo>()) {
+        Ok(Some(Some(info))) => Ok(info),
+        Err(e) => Err(anyhow::anyhow!(
+            "get local storage about {} error, details: {}",
+            employer,
+            e
         )),
+        _ => Err(anyhow::anyhow!("get local storage about {} error")),
     }
 }
