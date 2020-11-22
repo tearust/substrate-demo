@@ -19,6 +19,8 @@ use sp_runtime::offchain::storage::StorageValueRef;
 use sp_std::prelude::*;
 use sp_std::str;
 use uuid::{Builder, Uuid, Variant, Version};
+use sp_runtime::RuntimeAppPublic;
+use sp_runtime::traits::IdentifyAccount;
 
 #[cfg(test)]
 mod mock;
@@ -426,7 +428,21 @@ impl<T: Trait> Module<T> {
             debug::info!("No local account available");
             return;
         }
-        // todo ensure signer has rights to init errand tasks
+        let mut accounts: Vec<AccountId32> = Vec::new();
+        for (_pos, key) in <T::AuthorityId as AppCrypto<T::Public,
+            T::Signature>>::RuntimeAppPublic::all().into_iter().enumerate() {
+            let generic_public = <T::AuthorityId as
+            AppCrypto<T::Public, T::Signature>>::GenericPublic::from(key);
+            let public = generic_public.into();
+            let account_id = public.clone().into_account();
+            let account: AccountId32 = Self::account_to_bytes(&account_id).unwrap();
+            accounts.push(account);
+        }
+
+        #[cfg(feature = "std")]
+        if task::account_from_seed_in_accounts("Alice", accounts) {
+            return;
+        }
 
         let processing_errands: Vec<Cid> = ProcessingErrands::get();
         for item in processing_errands {
