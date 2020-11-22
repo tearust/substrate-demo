@@ -30,8 +30,7 @@ fn send_task_internal(
         SEND_ERRAND_TASK_ACTION,
         employer,
         String::from_utf8(errand_id.to_vec())?,
-        // todo convert signature to hex string
-        String::from_utf8(info.sig)?,
+        &hex::encode(info.sig),
         &cid,
     );
     let res = http_post(&request_url)?;
