@@ -3440,6 +3440,7 @@ dependencies = [
  "anyhow",
  "frame-support",
  "frame-system",
+ "hex",
  "pallet-randomness-collective-flip",
  "parity-scale-codec",
  "serde_json 1.0.44",
