@@ -13,7 +13,7 @@ use frame_system::{
     ensure_signed,
     offchain::{AppCrypto, CreateSignedTransaction, ForAll, SendSignedTransaction, Signer},
 };
-use sp_core::crypto::KeyTypeId;
+use sp_core::crypto::{AccountId32, KeyTypeId};
 use sp_io::hashing::blake2_128;
 use sp_runtime::offchain::{self as rt_offchain, storage::StorageValueRef};
 use sp_std::prelude::*;
@@ -25,6 +25,13 @@ mod mock;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "std")]
+mod delegate;
+#[cfg(feature = "std")]
+mod error;
+#[cfg(feature = "std")]
+mod http;
 
 pub const SERVICE_BASE_URL: &'static str = "http://localhost:8000";
 pub const SEND_ERRAND_TASK_ACTION: &'static str = "/api/service";
@@ -160,7 +167,8 @@ decl_event!(
         AccountId = <T as frame_system::Trait>::AccountId,
     {
         // todo add events
-        ErrandSended(AccountId, Errand),
+        DelegateRequested(AccountId, AccountId),
+        DelegateUpdated(AccountId),
     }
 );
 
@@ -181,6 +189,7 @@ decl_error! {
         EmployerNotExist,
         EmployerNotReady,
         NoRightToUpdateDelegate,
+        AccountId32ConvertionError,
     }
 }
 
@@ -201,13 +210,14 @@ decl_module! {
             let block_number = frame_system::Module::<T>::block_number();
             if EmployersApplys::<T>::contains_key(&block_number) {
                 let mut accounts = EmployersApplys::<T>::take(&block_number);
-                accounts.push((employer.clone(), sender));
+                accounts.push((employer.clone(), sender.clone()));
                 EmployersApplys::<T>::insert(&block_number, accounts);
             } else {
-                EmployersApplys::<T>::insert(&block_number, vec![(employer.clone(), sender)]);
+                EmployersApplys::<T>::insert(&block_number, vec![(employer.clone(), sender.clone())]);
             }
             Employers::<T>::insert(&employer, false);
 
+            Self::deposit_event(RawEvent::DelegateRequested(employer, sender));
             Ok(())
         }
 
@@ -224,6 +234,7 @@ decl_module! {
             Employers::<T>::mutate(&employer, |val| {
                 *val = true;
             });
+            Self::deposit_event(RawEvent::DelegateUpdated(employer));
             Ok(())
         }
 
@@ -288,7 +299,6 @@ decl_module! {
                 result: Vec::new(),
             };
             Errands::insert(errand_id, errand);
-            // Self::deposit_event(RawEvent::ErrandSended(sender, errand));
 
             Ok(())
         }
@@ -341,16 +351,16 @@ impl<T: Trait> Module<T> {
     }
 
     fn apply_delegates(block_number: T::BlockNumber) {
-        if !Tasks::<T>::contains_key(&block_number) {
+        if !EmployersApplys::<T>::contains_key(&block_number) {
             debug::info!("height {:?} has no delegates, just return", &block_number);
             return;
         }
 
-        let signer = Signer::<T, T::AuthorityId>::all_accounts();
-        if !signer.can_sign() {
-            debug::info!("No local account available");
-            return;
-        }
+        let signer = Signer::<T, T::AuthorityId>::any_account();
+        // if !signer.can_sign() {
+        //     debug::info!("No local account available");
+        //     return;
+        // }
 
         let accounts = EmployersApplys::<T>::get(&block_number);
         for acc in accounts.iter() {
@@ -409,23 +419,9 @@ impl<T: Trait> Module<T> {
     }
 
     fn apply_single_delegate(employer: &T::AccountId) -> Result<(), Error<T>> {
-        let request_url = [
-            SERVICE_BASE_URL,
-            APPLY_DELEGATE,
-            "?content=",
-            str::from_utf8(&employer.encode()).map_err(|_| Error::<T>::ApplyDelegateError)?,
-        ]
-        .concat();
-
-        let resp = Self::http_post(&request_url)?;
-        let resp_str = str::from_utf8(&resp).map_err(|_| Error::<T>::ResponseParsingError)?;
-        let result_info: DelegateInfo = serde_json::from_str::<DelegateInfo>(resp_str)
-            .map_err(|_| Error::<T>::ResponseParsingError)?;
-
-        Self::save_delegate_info(
-            str::from_utf8(&employer.encode()).map_err(|_| Error::<T>::ApplyDelegateError)?,
-            &result_info,
-        )?;
+        let account: AccountId32 = Self::account_to_bytes(employer)?;
+        #[cfg(feature = "std")]
+        delegate::request_single_delegate(account);
 
         Ok(())
     }
@@ -616,5 +612,15 @@ impl<T: Trait> Module<T> {
         }
 
         Ok(response.body().collect::<Vec<u8>>())
+    }
+
+    fn account_to_bytes(account: &T::AccountId) -> Result<AccountId32, Error<T>> {
+        let account_vec = account.encode();
+        if account_vec.len() != 32 {
+            return Err(Error::<T>::AccountId32ConvertionError);
+        }
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(&account_vec);
+        Ok(AccountId32::from(bytes))
     }
 }

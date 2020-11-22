@@ -1,9 +1,9 @@
 use crate::error::AbcError;
 use frame_support::debug;
 use sp_core::offchain::HttpError;
-use sp_runtime::offchain::{self as rt_offchain, http::PendingRequest, storage::StorageValueRef};
+use sp_runtime::offchain::{self as rt_offchain};
 
-fn http_post(url: &str) -> anyhow::Result<Vec<u8>> {
+pub fn http_post(url: &str) -> anyhow::Result<Vec<u8>> {
     let post_body = vec![b""];
 
     debug::info!("begin to send http post request, url is {}", url);
