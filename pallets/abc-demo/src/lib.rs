@@ -15,7 +15,7 @@ use frame_system::{
 };
 use sp_core::crypto::{AccountId32, KeyTypeId};
 use sp_io::hashing::blake2_128;
-use sp_runtime::offchain::{self as rt_offchain};
+use sp_runtime::offchain::storage::StorageValueRef;
 use sp_std::prelude::*;
 use sp_std::str;
 use uuid::{Builder, Uuid, Variant, Version};
@@ -33,15 +33,34 @@ mod error;
 #[cfg(feature = "std")]
 mod http;
 #[cfg(feature = "std")]
+mod storage;
+#[cfg(feature = "std")]
 mod task;
 
 pub const SERVICE_BASE_URL: &'static str = "http://localhost:8000";
-pub const SEND_ERRAND_TASK_ACTION: &'static str = "/api/service";
-pub const QUERY_ERRAND_RESULT_ACTION: &'static str = "/api/query_errand_execution_result_by_uuid";
-pub const APPLY_DELEGATE: &'static str = "/api/be_my_delegate";
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
 pub const TEA_SEND_TASK_TIMEOUT_PERIOD: u64 = 3000;
+
+pub const LOCAL_STORAGE_TASKS_RESULTS_KEY: &'static str = "local-storage::tasks_results";
+pub const LOCAL_STORAGE_TASKS_RESULTS_LOCK: &'static str = "local-storage::tasks_results-lock";
+
+#[serde(crate = "alt_serde")]
+#[derive(Encode, Decode, Deserialize, Clone)]
+struct ErrandResultInfo {
+    completed: bool,
+    #[serde(deserialize_with = "de_string_to_bytes")]
+    result_cid: Vec<u8>,
+    failed_count: u32,
+}
+
+pub fn de_string_to_bytes<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: &str = Deserialize::deserialize(de)?;
+    Ok(s.as_bytes().to_vec())
+}
 
 pub mod crypto {
     use crate::KEY_TYPE;
@@ -89,23 +108,6 @@ type ErrandId = Vec<u8>;
 
 type Cid = Vec<u8>;
 
-#[serde(crate = "alt_serde")]
-#[derive(Encode, Decode, Deserialize)]
-struct ErrandResultInfo {
-    completed: bool,
-    #[serde(deserialize_with = "de_string_to_bytes")]
-    result_cid: Vec<u8>,
-    failed_count: u32,
-}
-
-fn de_string_to_bytes<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: &str = Deserialize::deserialize(de)?;
-    Ok(s.as_bytes().to_vec())
-}
-
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
 enum ErrandStatus {
     Processing,
@@ -118,7 +120,7 @@ pub struct Errand {
     errand_id: ErrandId,
     description_cid: Cid,
     status: ErrandStatus,
-    result: Vec<u8>,
+    result: Cid,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
@@ -174,6 +176,7 @@ decl_error! {
         EmployerNotReady,
         NoRightToUpdateDelegate,
         AccountId32ConvertionError,
+        LocalStorageError,
     }
 }
 
@@ -314,6 +317,7 @@ decl_module! {
             Self::apply_delegates(block_number);
             Self::send_errand_tasks(block_number);
             Self::query_errand_task_results(block_number);
+            Self::update_errand_task_results(block_number);
         }
     }
 }
@@ -427,49 +431,82 @@ impl<T: Trait> Module<T> {
         let processing_errands: Vec<Cid> = ProcessingErrands::get();
         for item in processing_errands {
             let errand: Errand = Errands::get(&item).unwrap();
-            if let Err(e) = Self::try_update_single_errand(&signer, &errand.errand_id, &item) {
-                debug::error!("try_update_single_errand execute error: {:?}", e);
-            }
+
+            #[cfg(feature = "std")]
+            task::fetch_single_task_result(&errand.errand_id, &errand.description_cid);
         }
     }
 
-    fn try_update_single_errand(
-        signer: &Signer<T, T::AuthorityId, ForAll>,
-        errand_id: &ErrandId,
-        description_cid: &Cid,
-    ) -> Result<(), Error<T>> {
-        let resp_bytes = Self::query_single_task_result(errand_id).map_err(|e| {
-            debug::error!("query_result_from_http error: {:?}", e);
-            Error::<T>::QueryErrandResultError
+    fn update_errand_task_results(_block_number: T::BlockNumber) {
+        let signer = Signer::<T, T::AuthorityId>::all_accounts();
+        if !signer.can_sign() {
+            debug::info!("No local account available");
+            return;
+        }
+        // todo ensure signer has rights to init errand tasks
+
+        if let Err(e) = Self::load_tasks_results_info(&signer) {
+            debug::error!("load_tasks_results_info error: {:?}", e);
+        }
+    }
+
+    fn load_tasks_results_info(signer: &Signer<T, T::AuthorityId, ForAll>) -> Result<(), Error<T>> {
+        let key = LOCAL_STORAGE_TASKS_RESULTS_KEY.as_bytes().to_vec();
+        let lock_key = LOCAL_STORAGE_TASKS_RESULTS_LOCK.as_bytes().to_vec();
+
+        let value_ref = StorageValueRef::persistent(&key);
+        let lock = StorageValueRef::persistent(&lock_key);
+
+        let res: Result<bool, bool> = lock.mutate(|s: Option<Option<bool>>| {
+            match s {
+                // `s` can be one of the following:
+                //   `None`: the lock has never been set. Treated as the lock is free
+                //   `Some(None)`: unexpected case, treated it as AlreadyFetch
+                //   `Some(Some(false))`: the lock is free
+                //   `Some(Some(true))`: the lock is held
+                None | Some(Some(false)) => Ok(true),
+                _ => Err(Error::<T>::LocalStorageError),
+            }
         })?;
 
-        let resp_str = str::from_utf8(&resp_bytes).map_err(|_| Error::<T>::ResponseParsingError)?;
-        let result_info: ErrandResultInfo = serde_json::from_str::<ErrandResultInfo>(resp_str)
-            .map_err(|_| Error::<T>::ResponseParsingError)?;
+        match res {
+            Ok(true) => {
+                match value_ref.get::<Vec<(Cid, ErrandResultInfo)>>() {
+                    Some(Some(results)) => {
+                        for item in results.iter() {
+                            Self::update_single_errand(signer, &item.1.result_cid, &item.0)?;
+                        }
 
-        if !result_info.completed {
-            return Ok(());
+                        let empty_array: Vec<(Cid, ErrandResultInfo)> = vec![];
+                        value_ref.set(&empty_array);
+                    }
+                    _ => {}
+                }
+
+                lock.set(&false);
+                Ok(())
+            }
+            _ => Err(Error::<T>::LocalStorageError),
         }
+    }
 
+    fn update_single_errand(
+        signer: &Signer<T, T::AuthorityId, ForAll>,
+        result_cid: &Cid,
+        description_cid: &Cid,
+    ) -> Result<(), Error<T>> {
         let result = signer.send_signed_transaction(|_acct| {
-            Call::update_errand(description_cid.clone(), result_info.result_cid.clone())
+            Call::update_errand(description_cid.clone(), result_cid.clone())
         });
 
         for (_acc, err) in &result {
-            debug::error!("try update single errand {:?} error: {:?}", errand_id, err);
+            debug::error!(
+                "try update single errand {:?} error: {:?}",
+                description_cid,
+                err
+            );
         }
         Ok(())
-    }
-
-    fn query_single_task_result(errand_id: &ErrandId) -> Result<Vec<u8>, Error<T>> {
-        let request_url = [
-            SERVICE_BASE_URL,
-            QUERY_ERRAND_RESULT_ACTION,
-            "/",
-            str::from_utf8(&errand_id).map_err(|_| Error::<T>::QueryErrandResultError)?,
-        ]
-        .concat();
-        Self::http_post(&request_url)
     }
 
     fn init_single_errand_task(
@@ -497,29 +534,6 @@ impl<T: Trait> Module<T> {
         let mut errands: Vec<Cid> = ProcessingErrands::get();
         errands.retain(|item| !item.eq(description_cid));
         ProcessingErrands::put(errands);
-    }
-
-    fn http_post(url: &str) -> Result<Vec<u8>, Error<T>> {
-        let post_body = vec![b""];
-
-        let request = rt_offchain::http::Request::post(url, post_body);
-        let timeout = sp_io::offchain::timestamp().add(rt_offchain::Duration::from_millis(3000));
-        let pending = request
-            .deadline(timeout)
-            .send()
-            .map_err(|_| Error::<T>::SendErrandTaskError)?;
-
-        let response = pending
-            .try_wait(timeout)
-            .map_err(|_| Error::<T>::SendErrandTaskError)?
-            .map_err(|_| Error::<T>::SendErrandTaskError)?;
-
-        if response.code != 200 {
-            debug::error!("Unexpected http request status code: {}", response.code);
-            return Err(<Error<T>>::SendErrandTaskError);
-        }
-
-        Ok(response.body().collect::<Vec<u8>>())
     }
 
     fn account_to_bytes(account: &T::AccountId) -> Result<AccountId32, Error<T>> {
