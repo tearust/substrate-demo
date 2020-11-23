@@ -16,11 +16,11 @@ use frame_system::{
 use sp_core::crypto::{AccountId32, KeyTypeId};
 use sp_io::hashing::blake2_128;
 use sp_runtime::offchain::storage::StorageValueRef;
+use sp_runtime::traits::IdentifyAccount;
+use sp_runtime::RuntimeAppPublic;
 use sp_std::prelude::*;
 use sp_std::str;
 use uuid::{Builder, Uuid, Variant, Version};
-use sp_runtime::RuntimeAppPublic;
-use sp_runtime::traits::IdentifyAccount;
 
 #[cfg(test)]
 mod mock;
@@ -394,14 +394,17 @@ impl<T: Trait> Module<T> {
                         continue;
                     }
 
-                    // todo decode sender from item.sender
-                    let sender: T::AccountId = T::AccountId::default();
-                    Self::init_single_errand_task(
-                        &signer,
-                        &sender,
-                        &item.description_cid,
-                        &item.errand_id,
-                    );
+                    match T::AccountId::decode(&mut item.sender.as_slice()) {
+                        Ok(sender) => {
+                            Self::init_single_errand_task(
+                                &signer,
+                                &sender,
+                                &item.description_cid,
+                                &item.errand_id,
+                            );
+                        }
+                        Err(e) => debug::error!("decode account id error: {:?}", e),
+                    }
                 }
                 Err(e) => debug::error!("convert employer to str error: {:?}", e),
             }
@@ -422,17 +425,19 @@ impl<T: Trait> Module<T> {
         if height % 10 != 0 {
             return;
         }
-
         let signer = Signer::<T, T::AuthorityId>::all_accounts();
         if !signer.can_sign() {
             debug::info!("No local account available");
             return;
         }
         let mut accounts: Vec<AccountId32> = Vec::new();
-        for (_pos, key) in <T::AuthorityId as AppCrypto<T::Public,
-            T::Signature>>::RuntimeAppPublic::all().into_iter().enumerate() {
-            let generic_public = <T::AuthorityId as
-            AppCrypto<T::Public, T::Signature>>::GenericPublic::from(key);
+        for (_pos, key) in
+            <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::RuntimeAppPublic::all()
+                .into_iter()
+                .enumerate()
+        {
+            let generic_public =
+                <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::GenericPublic::from(key);
             let public = generic_public.into();
             let account_id = public.clone().into_account();
             let account: AccountId32 = Self::account_to_bytes(&account_id).unwrap();
