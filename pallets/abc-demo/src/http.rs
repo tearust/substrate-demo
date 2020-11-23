@@ -3,23 +3,29 @@ use frame_support::debug;
 use sp_core::offchain::HttpError;
 use sp_runtime::offchain::{self as rt_offchain};
 
+const USER_AGENT: &'static str = "tearust";
+
 pub fn http_post(url: &str) -> anyhow::Result<Vec<u8>> {
-    let post_body = vec![b""];
+    let post_body = vec![b"post body"];
 
     debug::info!("begin to send http post request, url is {}", url);
     let request = rt_offchain::http::Request::post(url, post_body);
     let timeout = sp_io::offchain::timestamp().add(rt_offchain::Duration::from_millis(3000));
-    let pending = request.deadline(timeout).send().map_err(|e| match e {
-        HttpError::DeadlineReached => AbcError::HttpRequestError(
-            "The requested action couldn't been completed within a deadline".into(),
-        ),
-        HttpError::IoError => {
-            AbcError::HttpRequestError("There was an IO Error while processing the request".into())
-        }
-        HttpError::Invalid => {
-            AbcError::HttpRequestError("ID of the request is invalid in this context".into())
-        }
-    })?;
+    let pending = request
+        .add_header("User-Agent", USER_AGENT)
+        .deadline(timeout)
+        .send()
+        .map_err(|e| match e {
+            HttpError::DeadlineReached => AbcError::HttpRequestError(
+                "The requested action couldn't been completed within a deadline".into(),
+            ),
+            HttpError::IoError => AbcError::HttpRequestError(
+                "There was an IO Error while processing the request".into(),
+            ),
+            HttpError::Invalid => {
+                AbcError::HttpRequestError("ID of the request is invalid in this context".into())
+            }
+        })?;
 
     let response = pending
         .try_wait(timeout)
