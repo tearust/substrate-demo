@@ -365,10 +365,10 @@ impl<T: Trait> Module<T> {
         let account_ids: Vec<(T::AccountId, T::Public)> = Self::get_accounts();
         let accounts = EmployersApplys::<T>::get(&block_number);
         for acc in accounts.iter() {
-            let mut selected_signers: Vec<T::Public> = Vec::new();
+            let mut signer_filter: Vec<T::Public> = Vec::new();
             for (a_id, pk) in account_ids.iter() {
                 if a_id == &acc.0 {
-                    selected_signers.push(pk.clone());
+                    signer_filter.push(pk.clone());
                 }
             }
             if let Err(e) = Self::apply_single_delegate(&acc.0) {
@@ -376,7 +376,7 @@ impl<T: Trait> Module<T> {
                 continue;
             }
             let result =  Signer::<T, T::AuthorityId>::all_accounts().with_filter(
-                selected_signers).send_signed_transaction(|_acct| {
+                signer_filter).send_signed_transaction(|_acct| {
                 Call::update_delegate_status(acc.0.clone(), acc.1.clone())
             });
 
@@ -397,7 +397,7 @@ impl<T: Trait> Module<T> {
             debug::info!("No local account available");
             return;
         }
-        // todo ensure signer has rights to init errand tasks
+        let account_ids: Vec<(T::AccountId, T::Public)> = Self::get_accounts();
         let task_array = Tasks::<T>::get(&block_number);
         for item in task_array.iter() {
             match str::from_utf8(&item.employer) {
@@ -410,11 +410,24 @@ impl<T: Trait> Module<T> {
                     ) {
                         continue;
                     }
+                    let mut signer_filter: Vec<T::Public> = Vec::new();
+                    match T::AccountId::decode(&mut item.employer.as_slice()) {
+                        Ok(epr) => {
+                            for (aid, pk) in account_ids.iter() {
+                                if aid == &epr {
+                                    signer_filter.push(pk.clone());
+                                }
+                            };
+                        }
+                        Err(e) => debug::error!("decode employer error: {:?}", e),
+                    }
 
                     match T::AccountId::decode(&mut item.sender.as_slice()) {
                         Ok(sender) => {
+                            let selected_signer = Signer::<T, T::AuthorityId>::all_accounts().
+                                with_filter(signer_filter);
                             Self::init_single_errand_task(
-                                &signer,
+                                &selected_signer,
                                 &sender,
                                 &item.description_cid,
                                 &item.errand_id,
