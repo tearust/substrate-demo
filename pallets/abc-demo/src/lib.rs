@@ -357,20 +357,26 @@ impl<T: Trait> Module<T> {
             return;
         }
 
-        let signer = Signer::<T, T::AuthorityId>::any_account();
-        // if !signer.can_sign() {
-        //     debug::info!("No local account available");
-        //     return;
-        // }
-
+        let signer = Signer::<T, T::AuthorityId>::all_accounts();
+        if !signer.can_sign() {
+            debug::info!("No local account available");
+            return;
+        }
+        let account_ids: Vec<(T::AccountId, T::Public)> = Self::get_accounts();
         let accounts = EmployersApplys::<T>::get(&block_number);
         for acc in accounts.iter() {
-            // todo ensure signer has rights to init errand tasks
+            let mut selected_signers: Vec<T::Public> = Vec::new();
+            for (a_id, pk) in account_ids.iter() {
+                if a_id == &acc.0 {
+                    selected_signers.push(pk.clone());
+                }
+            }
             if let Err(e) = Self::apply_single_delegate(&acc.0) {
                 debug::error!("apply_single_delegate error: {:?}", e);
                 continue;
             }
-            let result = signer.send_signed_transaction(|_acct| {
+            let result =  Signer::<T, T::AuthorityId>::all_accounts().with_filter(
+                selected_signers).send_signed_transaction(|_acct| {
                 Call::update_delegate_status(acc.0.clone(), acc.1.clone())
             });
 
@@ -586,5 +592,21 @@ impl<T: Trait> Module<T> {
         let mut bytes = [0u8; 32];
         bytes.copy_from_slice(&account_vec);
         Ok(AccountId32::from(bytes))
+    }
+
+    fn get_accounts() -> Vec<(T::AccountId, T::Public)> {
+        let mut account_ids: Vec<(T::AccountId, T::Public)> = Vec::new();
+        for (_pos, key) in
+        <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::RuntimeAppPublic::all()
+            .into_iter()
+            .enumerate()
+        {
+            let generic_public =
+                <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::GenericPublic::from(key);
+            let public: T::Public = generic_public.into();
+            let account_id: T::AccountId = public.clone().into_account();
+            account_ids.push((account_id, public.clone()));
+        }
+        return account_ids
     }
 }
