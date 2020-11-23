@@ -366,8 +366,8 @@ impl<T: Trait> Module<T> {
         let accounts = EmployersApplys::<T>::get(&block_number);
         for acc in accounts.iter() {
             let mut signer_filter: Vec<T::Public> = Vec::new();
-            for (a_id, pk) in account_ids.iter() {
-                if a_id == &acc.0 {
+            for (aid, pk) in account_ids.iter() {
+                if aid == &acc.0 {
                     signer_filter.push(pk.clone());
                 }
             }
@@ -460,19 +460,7 @@ impl<T: Trait> Module<T> {
             debug::info!("No local account available");
             return;
         }
-        let mut accounts: Vec<AccountId32> = Vec::new();
-        for (_pos, key) in
-            <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::RuntimeAppPublic::all()
-                .into_iter()
-                .enumerate()
-        {
-            let generic_public =
-                <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::GenericPublic::from(key);
-            let public = generic_public.into();
-            let account_id = public.clone().into_account();
-            let account: AccountId32 = Self::account_to_bytes(&account_id).unwrap();
-            accounts.push(account);
-        }
+        let accounts: Vec<AccountId32> = Self::get_account_ids();
 
         #[cfg(feature = "std")]
         if task::account_from_seed_in_accounts("Alice", accounts) {
@@ -494,7 +482,13 @@ impl<T: Trait> Module<T> {
             debug::info!("No local account available");
             return;
         }
-        // todo ensure signer has rights to init errand tasks
+
+        let accounts: Vec<AccountId32> = Self::get_account_ids();
+
+        #[cfg(feature = "std")]
+        if task::account_from_seed_in_accounts("Alice", accounts) {
+            return;
+        }
 
         if let Err(e) = Self::load_tasks_results_info(&signer) {
             debug::error!("load_tasks_results_info error: {:?}", e);
@@ -621,5 +615,22 @@ impl<T: Trait> Module<T> {
             account_ids.push((account_id, public.clone()));
         }
         return account_ids
+    }
+
+    fn get_account_ids() -> Vec<AccountId32> {
+        let mut accounts: Vec<AccountId32> = Vec::new();
+        for (_pos, key) in
+        <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::RuntimeAppPublic::all()
+            .into_iter()
+            .enumerate()
+        {
+            let generic_public =
+                <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::GenericPublic::from(key);
+            let public = generic_public.into();
+            let account_id = public.clone().into_account();
+            let account: AccountId32 = Self::account_to_bytes(&account_id).unwrap();
+            accounts.push(account);
+        }
+        return accounts
     }
 }
