@@ -7,8 +7,8 @@ use crate::{
     LOCAL_STORAGE_TASKS_RESULTS_LOCK, SERVICE_BASE_URL,
 };
 use frame_support::debug;
-use sp_core::Pair;
 use sp_core::crypto::AccountId32;
+use sp_core::Pair;
 
 const QUERY_ERRAND_RESULT_ACTION: &'static str = "/api/query_errand_execution_result_by_uuid";
 const SEND_ERRAND_TASK_ACTION: &'static str = "/api/service";
@@ -102,7 +102,7 @@ pub fn account_from_seed_in_accounts(seed: &str, accounts: Vec<AccountId32>) -> 
     let account = account_from_seed(seed);
     for ac in accounts {
         if ac.eq(&account) {
-            return true
+            return true;
         }
     }
     false
@@ -111,6 +111,7 @@ pub fn account_from_seed_in_accounts(seed: &str, accounts: Vec<AccountId32>) -> 
 fn account_from_seed(seed: &str) -> AccountId32 {
     let public: [u8; 32] = sp_core::sr25519::Pair::from_string(&format!("//{}", seed), None)
         .expect("static values are valid; qed")
-        .public().into();
+        .public()
+        .into();
     AccountId32::from(public)
 }
