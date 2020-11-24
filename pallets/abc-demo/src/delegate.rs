@@ -20,8 +20,8 @@ pub struct DelegateInfo {
     pub delegator_ephemeral_id: Vec<u8>,
     #[serde(deserialize_with = "de_string_to_bytes")]
     pub sig: Vec<u8>,
-    #[serde(deserialize_with = "de_string_to_bytes")]
-    pub key3_rsa_pub_key: Vec<u8>,
+
+    pub key3_rsa_pub_key: String,
 }
 
 pub fn request_single_delegate(account: AccountId32) {
