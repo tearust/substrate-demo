@@ -4,13 +4,15 @@ use sp_core::offchain::HttpError;
 use sp_runtime::offchain::{self as rt_offchain};
 
 const USER_AGENT: &'static str = "tearust";
+const HTTP_POST_TIMEOUT: u64 = 180000; // post timeout set to 3 minutes.
 
 pub fn http_post(url: &str) -> anyhow::Result<Vec<u8>> {
     let post_body = vec![b"post body"];
 
     debug::info!("begin to send http post request, url is {}", url);
     let request = rt_offchain::http::Request::post(url, post_body);
-    let timeout = sp_io::offchain::timestamp().add(rt_offchain::Duration::from_millis(3000));
+    let timeout =
+        sp_io::offchain::timestamp().add(rt_offchain::Duration::from_millis(HTTP_POST_TIMEOUT));
     let pending = request
         .add_header("User-Agent", USER_AGENT)
         .deadline(timeout)
