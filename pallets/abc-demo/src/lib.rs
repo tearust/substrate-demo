@@ -362,7 +362,7 @@ impl<T: Trait> Module<T> {
 
         let signer = Signer::<T, T::AuthorityId>::all_accounts();
         if !signer.can_sign() {
-            debug::info!("No local account available");
+            debug::info!("No local account available when apply delegate");
             return;
         }
         let account_ids: Vec<(T::AccountId, T::Public)> = Self::get_accounts();
@@ -378,10 +378,11 @@ impl<T: Trait> Module<T> {
                 debug::error!("apply_single_delegate error: {:?}", e);
                 continue;
             }
-            let result =  Signer::<T, T::AuthorityId>::all_accounts().with_filter(
-                signer_filter).send_signed_transaction(|_acct| {
-                Call::update_delegate_status(acc.0.clone(), acc.1.clone())
-            });
+            let result = Signer::<T, T::AuthorityId>::all_accounts()
+                .with_filter(signer_filter)
+                .send_signed_transaction(|_acct| {
+                    Call::update_delegate_status(acc.0.clone(), acc.1.clone())
+                });
 
             for (_acc, err) in &result {
                 debug::error!("apply delegate {:?} error: {:?}", &acc.0, err);
@@ -397,7 +398,7 @@ impl<T: Trait> Module<T> {
 
         let signer = Signer::<T, T::AuthorityId>::all_accounts();
         if !signer.can_sign() {
-            debug::info!("No local account available");
+            debug::info!("No local account available when send errand tasks");
             return;
         }
         let account_ids: Vec<(T::AccountId, T::Public)> = Self::get_accounts();
@@ -420,15 +421,15 @@ impl<T: Trait> Module<T> {
                                 if aid == &epr {
                                     signer_filter.push(pk.clone());
                                 }
-                            };
+                            }
                         }
                         Err(e) => debug::error!("decode sender error: {:?}", e),
                     }
 
                     match T::AccountId::decode(&mut item.sender.as_slice()) {
                         Ok(sender) => {
-                            let selected_signer = Signer::<T, T::AuthorityId>::all_accounts().
-                                with_filter(signer_filter);
+                            let selected_signer = Signer::<T, T::AuthorityId>::all_accounts()
+                                .with_filter(signer_filter);
                             Self::init_single_errand_task(
                                 &selected_signer,
                                 &sender,
@@ -460,7 +461,7 @@ impl<T: Trait> Module<T> {
         }
         let signer = Signer::<T, T::AuthorityId>::all_accounts();
         if !signer.can_sign() {
-            debug::info!("No local account available");
+            debug::info!("No local account available when query errand task results");
             return;
         }
         let accounts: Vec<AccountId32> = Self::get_account_ids();
@@ -482,7 +483,7 @@ impl<T: Trait> Module<T> {
     fn update_errand_task_results(_block_number: T::BlockNumber) {
         let signer = Signer::<T, T::AuthorityId>::all_accounts();
         if !signer.can_sign() {
-            debug::info!("No local account available");
+            debug::info!("No local account available when update errand task results");
             return;
         }
 
@@ -597,9 +598,9 @@ impl<T: Trait> Module<T> {
     fn get_accounts() -> Vec<(T::AccountId, T::Public)> {
         let mut account_ids: Vec<(T::AccountId, T::Public)> = Vec::new();
         for (_pos, key) in
-        <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::RuntimeAppPublic::all()
-            .into_iter()
-            .enumerate()
+            <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::RuntimeAppPublic::all()
+                .into_iter()
+                .enumerate()
         {
             let generic_public =
                 <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::GenericPublic::from(key);
@@ -607,15 +608,15 @@ impl<T: Trait> Module<T> {
             let account_id: T::AccountId = public.clone().into_account();
             account_ids.push((account_id, public.clone()));
         }
-        return account_ids
+        return account_ids;
     }
 
     fn get_account_ids() -> Vec<AccountId32> {
         let mut accounts: Vec<AccountId32> = Vec::new();
         for (_pos, key) in
-        <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::RuntimeAppPublic::all()
-            .into_iter()
-            .enumerate()
+            <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::RuntimeAppPublic::all()
+                .into_iter()
+                .enumerate()
         {
             let generic_public =
                 <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::GenericPublic::from(key);
@@ -624,6 +625,6 @@ impl<T: Trait> Module<T> {
             let account: AccountId32 = Self::account_to_bytes(&account_id).unwrap();
             accounts.push(account);
         }
-        return accounts
+        return accounts;
     }
 }
