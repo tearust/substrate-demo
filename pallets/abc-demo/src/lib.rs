@@ -141,6 +141,9 @@ decl_storage! {
 
         Employers get(fn employers): map hasher(blake2_128_concat) T::AccountId => bool;
 
+        EmployerSender get(fn employer_sender):
+            map hasher(blake2_128_concat) T::AccountId => T::AccountId;
+
         Tasks get(fn tasks):
             map hasher(blake2_128_concat) T::BlockNumber => Vec<TaskInfo>;
 
@@ -177,8 +180,10 @@ decl_error! {
         EmployerAlreadyExists,
         EmployerNotExist,
         EmployerNotReady,
+        EmployerSenderNotExist,
         NoRightToUpdateDelegate,
         NoRightToInitErrand,
+        NoRightToUpdateErrand,
         AccountId32ConvertionError,
         LocalStorageError,
     }
@@ -207,6 +212,7 @@ decl_module! {
                 EmployersApplys::<T>::insert(&block_number, vec![(employer.clone(), sender.clone())]);
             }
             Employers::<T>::insert(&employer, false);
+            EmployerSender::<T>::insert(&employer, &sender);
 
             Self::deposit_event(RawEvent::DelegateRequested(employer, sender));
             Ok(())
@@ -245,6 +251,8 @@ decl_module! {
             ensure!(Employers::<T>::contains_key(&employer), Error::<T>::EmployerNotExist);
             ensure!(Employers::<T>::get(&employer), Error::<T>::EmployerNotReady);
             ensure!(!Errands::contains_key(&description_cid), Error::<T>::ErrandAlreadyExecuted);
+            ensure!(EmployerSender::<T>::contains_key(&employer), Error::<T>::EmployerSenderNotExist);
+            ensure!(sender == EmployerSender::<T>::get(&employer), Error::<T>::EmployerSenderNotExist);
 
             let errand_id = Self::generate_errand_id(&sender);
             let task_info = TaskInfo {
@@ -280,7 +288,8 @@ decl_module! {
             ) -> dispatch::DispatchResult {
 
             let sender = ensure_signed(origin)?;
-            ensure!(sender == employer, Error::<T>::NoRightToInitErrand);
+            ensure!(EmployerSender::<T>::contains_key(&employer), Error::<T>::EmployerSenderNotExist);
+            ensure!(sender == EmployerSender::<T>::get(&employer), Error::<T>::EmployerSenderNotExist);
 
             let errand = Errand {
                 account_id: employer.encode(),
@@ -301,17 +310,11 @@ decl_module! {
             ) -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
             ensure!(Errands::contains_key(&description_cid), Error::<T>::ErrandTaskNotExist);
-            ensure!(Self::processing_errands_contains(&description_cid),  Error::<T>::ProcessingErrandNotExist);
-            if let Some(errand) = Errands::get(&description_cid) {
-                match T::AccountId::decode(&mut errand.account_id.as_slice()) {
-                    Ok(epr) => {
-                        ensure!(sender == epr, Error::<T>::NoRightToInitErrand);
-                    },
-                    Err(err) => debug::error!("decode account id error: {:?}", err)
-                }
-            } else {
-                debug::error!("errand is not exist")
-            }
+            let sender_account: AccountId32 = Self::account_to_bytes(&sender)?;
+            let accounts: Vec<AccountId32> = vec![sender_account];
+
+            #[cfg(feature = "std")]
+            ensure!(task::account_from_seed_in_accounts("Alice", accounts), Error::<T>::NoRightToUpdateErrand);
 
             Errands::mutate(&description_cid, |val| {
                 if let Some(errand) = val {
@@ -367,7 +370,7 @@ impl<T: Trait> Module<T> {
         for acc in accounts.iter() {
             let mut signer_filter: Vec<T::Public> = Vec::new();
             for (aid, pk) in account_ids.iter() {
-                if aid == &acc.0 {
+                if aid == &acc.1 {
                     signer_filter.push(pk.clone());
                 }
             }
@@ -411,7 +414,7 @@ impl<T: Trait> Module<T> {
                         continue;
                     }
                     let mut signer_filter: Vec<T::Public> = Vec::new();
-                    match T::AccountId::decode(&mut item.employer.as_slice()) {
+                    match T::AccountId::decode(&mut item.sender.as_slice()) {
                         Ok(epr) => {
                             for (aid, pk) in account_ids.iter() {
                                 if aid == &epr {
@@ -419,7 +422,7 @@ impl<T: Trait> Module<T> {
                                 }
                             };
                         }
-                        Err(e) => debug::error!("decode employer error: {:?}", e),
+                        Err(e) => debug::error!("decode sender error: {:?}", e),
                     }
 
                     match T::AccountId::decode(&mut item.sender.as_slice()) {
@@ -463,7 +466,7 @@ impl<T: Trait> Module<T> {
         let accounts: Vec<AccountId32> = Self::get_account_ids();
 
         #[cfg(feature = "std")]
-        if task::account_from_seed_in_accounts("Alice", accounts) {
+        if !task::account_from_seed_in_accounts("Alice", accounts) {
             return;
         }
 
@@ -486,7 +489,7 @@ impl<T: Trait> Module<T> {
         let accounts: Vec<AccountId32> = Self::get_account_ids();
 
         #[cfg(feature = "std")]
-        if task::account_from_seed_in_accounts("Alice", accounts) {
+        if !task::account_from_seed_in_accounts("Alice", accounts) {
             return;
         }
 
@@ -579,16 +582,6 @@ impl<T: Trait> Module<T> {
         let mut errands: Vec<Cid> = ProcessingErrands::get();
         errands.retain(|item| !item.eq(description_cid));
         ProcessingErrands::put(errands);
-    }
-
-    fn processing_errands_contains(description_cid: &Cid) -> bool {
-        let errands: Vec<Cid> = ProcessingErrands::get();
-        for e in errands {
-            if &e == description_cid {
-                return true;
-            }
-        }
-        false
     }
 
     fn account_to_bytes(account: &T::AccountId) -> Result<AccountId32, Error<T>> {
