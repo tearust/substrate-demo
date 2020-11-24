@@ -115,6 +115,7 @@ pub fn new_full(config: Configuration) -> Result<TaskManager, ServiceError> {
 	let enable_grandpa = !config.disable_grandpa;
 	let prometheus_registry = config.prometheus_registry().cloned();
 	let telemetry_connection_sinks = sc_service::TelemetryConnectionSinks::default();
+	let dev_seed = config.dev_key_seed.clone();
 
 	let rpc_extensions_builder = {
 		let client = client.clone();
@@ -130,6 +131,16 @@ pub fn new_full(config: Configuration) -> Result<TaskManager, ServiceError> {
 			crate::rpc::create_full(deps)
 		})
 	};
+
+	if let Some(seed) = dev_seed {
+		keystore
+			.write()
+			.insert_ephemeral_from_seed_by_type::<node_template_runtime::pallet_abc::crypto::Pair>(
+				&seed,
+				node_template_runtime::pallet_abc::KEY_TYPE,
+			)
+			.expect("Dev seed should always succeed");
+	}
 
 	sc_service::spawn_tasks(sc_service::SpawnTasksParams {
 		network: network.clone(),
