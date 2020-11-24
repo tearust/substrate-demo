@@ -1,10 +1,18 @@
 use crate::error::AbcError;
+use alt_serde::Deserialize;
+use codec::{Decode, Encode};
 use frame_support::debug;
 use sp_core::offchain::HttpError;
 use sp_runtime::offchain::{self as rt_offchain};
 
 const USER_AGENT: &'static str = "tearust";
 const HTTP_POST_TIMEOUT: u64 = 180000; // post timeout set to 3 minutes.
+
+#[serde(crate = "alt_serde")]
+#[derive(Encode, Decode, Deserialize, Clone)]
+struct ResponseResult {
+    data: String,
+}
 
 pub fn http_post(url: &str) -> anyhow::Result<Vec<u8>> {
     let post_body = vec![b"post body"];
@@ -41,11 +49,13 @@ pub fn http_post(url: &str) -> anyhow::Result<Vec<u8>> {
         ));
     }
 
-    let res_body = response.body().collect::<Vec<u8>>();
+    let res_body = String::from_utf8(response.body().collect::<Vec<u8>>())?;
+    let response_result: ResponseResult = serde_json::from_str::<ResponseResult>(&res_body)
+        .map_err(|e| AbcError::Common(format!("{}", e)))?;
     debug::info!(
         "end of http request ({}), response is {}",
         url,
-        String::from_utf8(res_body.clone())?
+        &response_result.data,
     );
-    Ok(res_body)
+    Ok(response_result.data.as_bytes().to_vec())
 }
