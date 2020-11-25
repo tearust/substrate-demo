@@ -404,16 +404,22 @@ impl<T: Trait> Module<T> {
         let account_ids: Vec<(T::AccountId, T::Public)> = Self::get_accounts();
         let task_array = Tasks::<T>::get(&block_number);
         for item in task_array.iter() {
-            match str::from_utf8(&item.employer) {
+            match T::AccountId::decode(&mut item.employer.as_slice()) {
                 Ok(employer) => {
-                    #[cfg(feature = "std")]
-                    if task::send_task_to_tea_network(
-                        employer,
-                        &item.description_cid,
-                        &item.errand_id,
-                    ) {
-                        continue;
+                    match Self::account_to_bytes(&employer) {
+                        Ok(account) => {
+                            #[cfg(feature = "std")]
+                            if task::send_task_to_tea_network(
+                                &account,
+                                &item.description_cid,
+                                &item.errand_id,
+                            ) {
+                                continue;
+                            }
+                        }
+                        Err(e) => debug::error!("decode employer error: {:?}", e),
                     }
+
                     let mut signer_filter: Vec<T::Public> = Vec::new();
                     match T::AccountId::decode(&mut item.sender.as_slice()) {
                         Ok(epr) => {
