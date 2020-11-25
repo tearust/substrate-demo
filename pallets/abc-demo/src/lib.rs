@@ -276,7 +276,6 @@ decl_module! {
             } else {
                 Tasks::<T>::insert(&block_number, vec![task_info]);
             }
-            Self::add_processing(description_cid);
 
             Ok(())
         }
@@ -295,11 +294,12 @@ decl_module! {
             let errand = Errand {
                 account_id: employer.encode(),
                 errand_id: errand_id.clone(),
-                description_cid,
+                description_cid: description_cid.clone(),
                 status: ErrandStatus::Processing,
                 result: Vec::new(),
             };
-            Errands::insert(errand_id, errand);
+            Errands::insert(description_cid.clone(), errand);
+            Self::add_processing(description_cid);
 
             Ok(())
         }
