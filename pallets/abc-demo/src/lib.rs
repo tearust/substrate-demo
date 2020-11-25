@@ -410,7 +410,7 @@ impl<T: Trait> Module<T> {
                     match Self::account_to_bytes(&employer) {
                         Ok(account) => {
                             #[cfg(feature = "std")]
-                            if task::send_task_to_tea_network(
+                            if !task::send_task_to_tea_network(
                                 &account,
                                 &item.description_cid,
                                 &item.errand_id,
