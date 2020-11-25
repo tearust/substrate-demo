@@ -628,8 +628,12 @@ impl<T: Trait> Module<T> {
                 <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::GenericPublic::from(key);
             let public = generic_public.into();
             let account_id = public.clone().into_account();
-            let account: AccountId32 = Self::account_to_bytes(&account_id).unwrap();
-            accounts.push(account);
+            match Self::account_to_bytes(&account_id) {
+                Ok(account) => accounts.push(account),
+                Err(e) => {
+                    debug::error!("account_to_bytes convert {:?} error: {}", account_id, e);
+                }
+            }
         }
         return accounts;
     }
