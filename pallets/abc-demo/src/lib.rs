@@ -159,9 +159,11 @@ decl_event!(
     where
         AccountId = <T as frame_system::Trait>::AccountId,
     {
-        // todo add events
         DelegateRequested(AccountId, AccountId),
         DelegateUpdated(AccountId),
+        TaskBegined(AccountId, Vec<u8>, AccountId),
+        ErrandInited(AccountId, Vec<u8>),
+        ErrandUpdated(Vec<u8>),
     }
 );
 
@@ -277,6 +279,7 @@ decl_module! {
                 Tasks::<T>::insert(&block_number, vec![task_info]);
             }
 
+            Self::deposit_event(RawEvent::TaskBegined(employer, description_cid, sender));
             Ok(())
         }
 
@@ -299,8 +302,9 @@ decl_module! {
                 result: Vec::new(),
             };
             Errands::insert(description_cid.clone(), errand);
-            Self::add_processing(description_cid);
+            Self::add_processing(description_cid.clone());
 
+            Self::deposit_event(RawEvent::ErrandInited(employer, description_cid));
             Ok(())
         }
 
@@ -325,6 +329,7 @@ decl_module! {
             });
             Self::remove_processing(&description_cid);
 
+            Self::deposit_event(RawEvent::ErrandUpdated(description_cid));
             Ok(())
         }
 
