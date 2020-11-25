@@ -175,6 +175,7 @@ decl_error! {
         ResponseParsingError,
         ErrandAlreadyExecuted,
         ErrandTaskNotExist,
+        ErrandItemIsNone,
         ProcessingErrandNotExist,
         ApplyDelegateError,
         EmployerAlreadyExists,
@@ -478,11 +479,18 @@ impl<T: Trait> Module<T> {
         }
 
         let processing_errands: Vec<Cid> = ProcessingErrands::get();
+        debug::info!(
+            "processing errand counts is {} at height {}",
+            processing_errands.len(),
+            height
+        );
         for item in processing_errands {
-            let errand: Errand = Errands::get(&item).unwrap();
-
-            #[cfg(feature = "std")]
-            task::fetch_single_task_result(&errand.errand_id, &errand.description_cid);
+            if let Some(errand) = Errands::get(&item) {
+                #[cfg(feature = "std")]
+                task::fetch_single_task_result(&errand.errand_id, &errand.description_cid);
+            } else {
+                debug::error!("found empty errand with cid: {:?}", item);
+            }
         }
     }
 
@@ -631,7 +639,7 @@ impl<T: Trait> Module<T> {
             match Self::account_to_bytes(&account_id) {
                 Ok(account) => accounts.push(account),
                 Err(e) => {
-                    debug::error!("account_to_bytes convert {:?} error: {}", account_id, e);
+                    debug::error!("account_to_bytes convert {:?} error: {:?}", account_id, e);
                 }
             }
         }
