@@ -58,11 +58,12 @@ fn http_query_task_result(errand_id: &ErrandId) -> anyhow::Result<Vec<u8>> {
 }
 
 pub fn send_task_to_tea_network(
-    employer: &str,
+    account: &AccountId32,
     description_cid: &Cid,
     errand_id: &ErrandId,
 ) -> bool {
-    match send_task_internal(employer, description_cid, errand_id) {
+    let employer = format!("{}", account);
+    match send_task_internal(&employer, description_cid, errand_id) {
         Ok(_) => true,
         Err(e) => {
             debug::error!("send_task_to_tea_network got error: {}", e);
