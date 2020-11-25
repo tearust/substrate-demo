@@ -32,6 +32,7 @@ alt_serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, git = "https://github.com/Xanewok/json", branch = "no-std", features = ["alloc"] }
 thiserror = "1.0.22"
 anyhow = { version = "1.0.34", default-features = false}
+pallet-balances = { default-features = false, version = '2.0.0' }
 
 [dev-dependencies]
 
@@ -41,4 +42,5 @@ std = [
     'codec/std',
     'frame-support/std',
     'frame-system/std',
+    'pallet-balances/std'
 ]
