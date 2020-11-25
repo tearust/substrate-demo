@@ -163,7 +163,7 @@ decl_event!(
         DelegateUpdated(AccountId),
         TaskBegined(AccountId, Vec<u8>, AccountId),
         ErrandInited(AccountId, Vec<u8>),
-        ErrandUpdated(Vec<u8>),
+        ErrandUpdated(Vec<u8>, Vec<u8>),
     }
 );
 
@@ -271,7 +271,7 @@ decl_module! {
                 let mut task_array = Tasks::<T>::take(&block_number);
 
                 for task in task_array.iter() {
-                    ensure!(!Errands::contains_key(&task.description_cid), Error::<T>::ErrandAlreadyExecuted);
+                    ensure!(!task.description_cid.eq(&description_cid), Error::<T>::ErrandAlreadyExecuted);
                 }
                 task_array.push(task_info);
                 Tasks::<T>::insert(&block_number, task_array);
@@ -291,8 +291,9 @@ decl_module! {
             ) -> dispatch::DispatchResult {
 
             let sender = ensure_signed(origin)?;
-            ensure!(EmployerSender::<T>::contains_key(&employer), Error::<T>::EmployerSenderNotExist);
-            ensure!(sender == EmployerSender::<T>::get(&employer), Error::<T>::EmployerSenderNotExist);
+            // fixme
+            // ensure!(EmployerSender::<T>::contains_key(&employer), Error::<T>::EmployerSenderNotExist);
+            // ensure!(sender == EmployerSender::<T>::get(&employer), Error::<T>::EmployerSenderNotExist);
 
             let errand = Errand {
                 account_id: employer.encode(),
@@ -324,12 +325,12 @@ decl_module! {
             Errands::mutate(&description_cid, |val| {
                 if let Some(errand) = val {
                     errand.status = ErrandStatus::Done;
-                    errand.result = result;
+                    errand.result = result.clone();
                 }
             });
             Self::remove_processing(&description_cid);
 
-            Self::deposit_event(RawEvent::ErrandUpdated(description_cid));
+            Self::deposit_event(RawEvent::ErrandUpdated(description_cid, result));
             Ok(())
         }
 
@@ -391,7 +392,9 @@ impl<T: Trait> Module<T> {
                 });
 
             for (_acc, err) in &result {
-                debug::error!("apply delegate {:?} error: {:?}", &acc.0, err);
+                if err.is_err() {
+                    debug::error!("apply delegate {:?} error: {:?}", &acc.0, err);
+                }
             }
         }
     }
@@ -568,11 +571,13 @@ impl<T: Trait> Module<T> {
         });
 
         for (_acc, err) in &result {
-            debug::error!(
-                "try update single errand {:?} error: {:?}",
-                description_cid,
-                err
-            );
+            if err.is_err() {
+                debug::error!(
+                    "try update single errand {:?} error: {:?}",
+                    description_cid,
+                    err
+                );
+            }
         }
         Ok(())
     }
@@ -588,7 +593,9 @@ impl<T: Trait> Module<T> {
         });
 
         for (_acc, err) in &result {
-            debug::error!("init errand {:?} error: {:?}", errand_id, err);
+            if err.is_err() {
+                debug::error!("init errand {:?} error: {:?}", errand_id, err);
+            }
         }
     }
 
