@@ -291,9 +291,8 @@ decl_module! {
             ) -> dispatch::DispatchResult {
 
             let sender = ensure_signed(origin)?;
-            // fixme
-            // ensure!(EmployerSender::<T>::contains_key(&employer), Error::<T>::EmployerSenderNotExist);
-            // ensure!(sender == EmployerSender::<T>::get(&employer), Error::<T>::EmployerSenderNotExist);
+            ensure!(EmployerSender::<T>::contains_key(&employer), Error::<T>::EmployerSenderNotExist);
+            ensure!(sender == EmployerSender::<T>::get(&employer), Error::<T>::EmployerSenderNotExist);
 
             let errand = Errand {
                 account_id: employer.encode(),
@@ -431,9 +430,9 @@ impl<T: Trait> Module<T> {
 
                     let mut signer_filter: Vec<T::Public> = Vec::new();
                     match T::AccountId::decode(&mut item.sender.as_slice()) {
-                        Ok(epr) => {
+                        Ok(sdr) => {
                             for (aid, pk) in account_ids.iter() {
-                                if aid == &epr {
+                                if aid == &sdr {
                                     signer_filter.push(pk.clone());
                                 }
                             }
@@ -441,13 +440,13 @@ impl<T: Trait> Module<T> {
                         Err(e) => debug::error!("decode sender error: {:?}", e),
                     }
 
-                    match T::AccountId::decode(&mut item.sender.as_slice()) {
-                        Ok(sender) => {
+                    match T::AccountId::decode(&mut item.employer.as_slice()) {
+                        Ok(employer) => {
                             let selected_signer = Signer::<T, T::AuthorityId>::all_accounts()
                                 .with_filter(signer_filter);
                             Self::init_single_errand_task(
                                 &selected_signer,
-                                &sender,
+                                &employer,
                                 &item.description_cid,
                                 &item.errand_id,
                             );
@@ -584,12 +583,12 @@ impl<T: Trait> Module<T> {
 
     fn init_single_errand_task(
         signer: &Signer<T, T::AuthorityId, ForAll>,
-        sender: &T::AccountId,
+        employer: &T::AccountId,
         description_cid: &Cid,
         errand_id: &ErrandId,
     ) {
         let result = signer.send_signed_transaction(|_acct| {
-            Call::init_errand(sender.clone(), errand_id.clone(), description_cid.clone())
+            Call::init_errand(employer.clone(), errand_id.clone(), description_cid.clone())
         });
 
         for (_acc, err) in &result {
