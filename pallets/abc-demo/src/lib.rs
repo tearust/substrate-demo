@@ -40,6 +40,7 @@ mod storage;
 mod task;
 
 pub const SERVICE_BASE_URL: &'static str = "http://localhost:8000";
+pub const SERVICE_BASE_URL_PREFIX: &'static str = "http://";
 
 pub const KEY_TYPE: KeyTypeId = KeyTypeId(*b"demo");
 pub const TEA_SEND_TASK_TIMEOUT_PERIOD: u64 = 3000;
@@ -110,6 +111,8 @@ type ErrandId = Vec<u8>;
 
 type Cid = Vec<u8>;
 
+type NetAddress = Vec<u8>;
+
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
 enum ErrandStatus {
     Processing,
@@ -143,6 +146,9 @@ decl_storage! {
 
         EmployerSender get(fn employer_sender):
             map hasher(blake2_128_concat) T::AccountId => T::AccountId;
+
+        EmployerNetAddress get(fn employer_ip_address):
+            map hasher(blake2_128_concat) T::AccountId => NetAddress;
 
         Tasks get(fn tasks):
             map hasher(blake2_128_concat) T::BlockNumber => Vec<TaskInfo>;
@@ -201,6 +207,7 @@ decl_module! {
         #[weight = 10_000]
         pub fn request_delegate(origin,
             employer: T::AccountId,
+            net_address: NetAddress,
         ) -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
 
@@ -216,6 +223,7 @@ decl_module! {
             }
             Employers::<T>::insert(&employer, false);
             EmployerSender::<T>::insert(&employer, &sender);
+            EmployerNetAddress::<T>::insert(&employer, net_address);
 
             Self::deposit_event(RawEvent::DelegateRequested(employer, sender));
             Ok(())
@@ -416,11 +424,13 @@ impl<T: Trait> Module<T> {
                 Ok(employer) => {
                     match Self::account_to_bytes(&employer) {
                         Ok(account) => {
+                            let net_address = EmployerNetAddress::<T>::get(&employer);
                             #[cfg(feature = "std")]
                             if !task::send_task_to_tea_network(
                                 &account,
                                 &item.description_cid,
                                 &item.errand_id,
+                                &net_address,
                             ) {
                                 continue;
                             }
@@ -461,8 +471,9 @@ impl<T: Trait> Module<T> {
 
     fn apply_single_delegate(employer: &T::AccountId) -> Result<(), Error<T>> {
         let account: AccountId32 = Self::account_to_bytes(employer)?;
+        let net_address = EmployerNetAddress::<T>::get(&employer);
         #[cfg(feature = "std")]
-        delegate::request_single_delegate(account);
+        delegate::request_single_delegate(account, &net_address);
 
         Ok(())
     }
@@ -493,8 +504,14 @@ impl<T: Trait> Module<T> {
         );
         for item in processing_errands {
             if let Some(errand) = Errands::get(&item) {
-                #[cfg(feature = "std")]
-                task::fetch_single_task_result(&errand.errand_id, &errand.description_cid);
+                match T::AccountId::decode(&mut errand.account_id.as_slice()) {
+                    Ok(employer) => {
+                        let net_address = EmployerNetAddress::<T>::get(&employer);
+                        #[cfg(feature = "std")]
+                        task::fetch_single_task_result(&errand.errand_id, &errand.description_cid, &net_address);
+                    }
+                    Err(e) => debug::error!("decode account id error: {:?}", e),
+                }
             } else {
                 debug::error!("found empty errand with cid: {:?}", item);
             }

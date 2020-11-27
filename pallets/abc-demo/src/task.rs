@@ -1,11 +1,8 @@
-use crate::delegate::{load_delegate_info, DelegateInfo};
+use crate::delegate::{load_delegate_info, DelegateInfo, get_url};
 use crate::error::AbcError;
 use crate::http::http_post;
 use crate::storage::operate_local_storage;
-use crate::{
-    Cid, ErrandId, ErrandResultInfo, LOCAL_STORAGE_TASKS_RESULTS_KEY,
-    LOCAL_STORAGE_TASKS_RESULTS_LOCK, SERVICE_BASE_URL,
-};
+use crate::{Cid, ErrandId, ErrandResultInfo, LOCAL_STORAGE_TASKS_RESULTS_KEY, LOCAL_STORAGE_TASKS_RESULTS_LOCK, NetAddress};
 use frame_support::debug;
 use sp_core::crypto::AccountId32;
 use sp_core::Pair;
@@ -13,8 +10,8 @@ use sp_core::Pair;
 const QUERY_ERRAND_RESULT_ACTION: &'static str = "/api/query_errand_execution_result_by_uuid";
 const SEND_ERRAND_TASK_ACTION: &'static str = "/api/service";
 
-pub fn fetch_single_task_result(errand_id: &ErrandId, description_cid: &Cid) -> bool {
-    match fetch_errand_result_info(errand_id, description_cid) {
+pub fn fetch_single_task_result(errand_id: &ErrandId, description_cid: &Cid, net_address: &NetAddress) -> bool {
+    match fetch_errand_result_info(errand_id, description_cid, net_address) {
         Ok(result) => result,
         Err(e) => {
             debug::error!("query_result_from_http error: {}", e);
@@ -23,8 +20,8 @@ pub fn fetch_single_task_result(errand_id: &ErrandId, description_cid: &Cid) -> 
     }
 }
 
-fn fetch_errand_result_info(errand_id: &ErrandId, description_cid: &Cid) -> anyhow::Result<bool> {
-    let resp_bytes = http_query_task_result(errand_id)?;
+fn fetch_errand_result_info(errand_id: &ErrandId, description_cid: &Cid, net_address: &NetAddress) -> anyhow::Result<bool> {
+    let resp_bytes = http_query_task_result(errand_id, &net_address)?;
     let resp_str = String::from_utf8(resp_bytes)?;
     let result_info: ErrandResultInfo = serde_json::from_str::<ErrandResultInfo>(&resp_str)
         .map_err(|e| AbcError::Common(format!("{}", e)))?;
@@ -47,10 +44,10 @@ fn fetch_errand_result_info(errand_id: &ErrandId, description_cid: &Cid) -> anyh
     Ok(true)
 }
 
-fn http_query_task_result(errand_id: &ErrandId) -> anyhow::Result<Vec<u8>> {
+fn http_query_task_result(errand_id: &ErrandId, net_address: &NetAddress) -> anyhow::Result<Vec<u8>> {
     let request_url = format!(
         "{}{}/{}",
-        SERVICE_BASE_URL,
+        get_url(net_address),
         QUERY_ERRAND_RESULT_ACTION,
         String::from_utf8(errand_id.to_vec())?,
     );
@@ -61,9 +58,10 @@ pub fn send_task_to_tea_network(
     account: &AccountId32,
     description_cid: &Cid,
     errand_id: &ErrandId,
+    net_address: &NetAddress
 ) -> bool {
     let employer = format!("{}", account);
-    match send_task_internal(&employer, description_cid, errand_id) {
+    match send_task_internal(&employer, description_cid, errand_id, net_address) {
         Ok(_) => true,
         Err(e) => {
             debug::error!("send_task_to_tea_network got error: {}", e);
@@ -76,12 +74,13 @@ fn send_task_internal(
     employer: &str,
     description_cid: &Cid,
     errand_id: &ErrandId,
+    net_address: &NetAddress,
 ) -> anyhow::Result<()> {
     let info: DelegateInfo = load_delegate_info(employer)?;
     let cid = String::from_utf8(description_cid.to_vec())?;
     let request_url = format!(
         "{}{}/{}/{}/{}?content={}",
-        SERVICE_BASE_URL,
+        get_url(net_address),
         SEND_ERRAND_TASK_ACTION,
         employer,
         String::from_utf8(errand_id.to_vec())?,
