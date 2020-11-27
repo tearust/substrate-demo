@@ -1,6 +1,6 @@
 use crate::error::AbcError;
 use crate::storage::operate_local_storage;
-use crate::{de_string_to_bytes, SERVICE_BASE_URL};
+use crate::{de_string_to_bytes, NetAddress, SERVICE_BASE_URL_PREFIX};
 use alt_serde::Deserialize;
 use codec::{Decode, Encode};
 use frame_support::debug;
@@ -28,7 +28,18 @@ pub struct DelegateInfo {
     pub key3_rsa_pub_key: String,
 }
 
-pub fn request_single_delegate(account: AccountId32) {
+pub fn get_url(net_address: &NetAddress) -> String {
+    let mut url = String::new();
+    url.push_str(SERVICE_BASE_URL_PREFIX);
+    let ip_str = String::from_utf8(net_address.to_vec());
+    match ip_str {
+        Ok(str) => url.push_str(&str),
+        Err(e) => debug::error!("delegate request failed: {}", e),
+    }
+    url
+}
+
+pub fn request_single_delegate(account: AccountId32, net_address: &NetAddress) {
     let employer = format!("{}", account);
     let proto_msg = actor_delegate_proto::BeMyDelegateRequest {
         layer1_account: employer.clone(),
@@ -40,7 +51,7 @@ pub fn request_single_delegate(account: AccountId32) {
             let content = base64::encode(buf);
             let request_url = format!(
                 "{}{}?content={}",
-                SERVICE_BASE_URL, APPLY_DELEGATE, &content
+                get_url(net_address), APPLY_DELEGATE, &content
             );
 
             match crate::http::http_post(&request_url) {

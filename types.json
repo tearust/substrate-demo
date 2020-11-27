@@ -3,6 +3,7 @@
   "LookupSource": "AccountId",
   "ErrandId": "Bytes",
   "Cid": "Bytes",
+  "NetAddress": "Bytes",
   "EmployerAccountId": "Bytes",
   "ErrandStatus": {
     "_enum": ["Precessing", "Done"]
