@@ -51,26 +51,28 @@ pub fn request_single_delegate(account: AccountId32, net_address: &NetAddress) -
             let content = base64::encode(buf);
             let request_url = format!(
                 "{}{}?content={}",
-                get_url(net_address), APPLY_DELEGATE, &content
+                get_url(net_address),
+                APPLY_DELEGATE,
+                &content
             );
 
             match crate::http::http_post(&request_url) {
                 Ok(resp) => {
                     if let Err(e) = parse_delegate_response(resp, &employer) {
-                        debug::error!("parse delegate response failed: {}", e)
+                        debug::error!("parse delegate response failed: {}", e);
                         return false;
                     }
                 }
                 Err(e) => {
                     debug::error!("delegate request failed: {}", e);
                     return false;
-                },
+                }
             }
         }
         Err(e) => {
             debug::error!("encode protobuf failed: {}", e);
             return false;
-        },
+        }
     }
     true
 }
