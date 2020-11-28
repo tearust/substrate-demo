@@ -262,6 +262,7 @@ impl pallet_sudo::Trait for Runtime {
 }
 
 impl pallet_abc::Trait for Runtime {
+	type Currency = Balances;
 	type Event = Event;
 	type AuthorityId = pallet_abc::crypto::AuthId;
 	type Call = Call;
