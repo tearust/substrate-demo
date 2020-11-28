@@ -28,15 +28,20 @@ pub struct DelegateInfo {
     pub key3_rsa_pub_key: String,
 }
 
-pub fn get_url(net_address: &NetAddress) -> String {
+pub fn get_url(net_address: &NetAddress) -> anyhow::Result<String> {
     let mut url = String::new();
     url.push_str(SERVICE_BASE_URL_PREFIX);
     let ip_str = String::from_utf8(net_address.to_vec());
     match ip_str {
-        Ok(str) => url.push_str(&str),
-        Err(e) => debug::error!("delegate request failed: {}", e),
+        Ok(str) => {
+            url.push_str(&str);
+            Ok(url)
+        }
+        Err(e) => Err(anyhow::anyhow!(
+            "get url from net address failed, error:{}",
+            e
+        )),
     }
-    url
 }
 
 pub fn request_single_delegate(account: AccountId32, net_address: &NetAddress) -> bool {
@@ -46,20 +51,24 @@ pub fn request_single_delegate(account: AccountId32, net_address: &NetAddress) -
         // todo generate a nonce value
         nonce: Vec::<u8>::new(),
     };
+    let service_url: String;
+    let url = get_url(net_address);
+    match url {
+        Ok(u) => service_url = u,
+        Err(e) => {
+            debug::error!("delegate request failed: {}", e);
+            return false;
+        }
+    }
     match encode_protobuf(proto_msg) {
         Ok(buf) => {
             let content = base64::encode(buf);
-            let request_url = format!(
-                "{}{}?content={}",
-                get_url(net_address),
-                APPLY_DELEGATE,
-                &content
-            );
+            let request_url = format!("{}{}?content={}", service_url, APPLY_DELEGATE, &content);
 
             match crate::http::http_post(&request_url) {
                 Ok(resp) => {
                     if let Err(e) = parse_delegate_response(resp, &employer) {
-                        debug::error!("parse delegate response failed: {}", e);
+                        debug::error!("parse delegate response: {}", e);
                         return false;
                     }
                 }
