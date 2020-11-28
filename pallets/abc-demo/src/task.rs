@@ -38,7 +38,7 @@ fn fetch_errand_result_info(
         .map_err(|e| AbcError::Common(format!("{}", e)))?;
     if result_info.completed != true {
         debug::info!("errand is not completed");
-        return Ok(true)
+        return Ok(true);
     }
 
     let key = LOCAL_STORAGE_TASKS_RESULTS_KEY.as_bytes().to_vec();
@@ -63,9 +63,10 @@ fn http_query_task_result(
     errand_id: &ErrandId,
     net_address: &NetAddress,
 ) -> anyhow::Result<Vec<u8>> {
+    let service_url = get_url(net_address)?;
     let request_url = format!(
         "{}{}/{}",
-        get_url(net_address),
+        service_url,
         QUERY_ERRAND_RESULT_ACTION,
         String::from_utf8(errand_id.to_vec())?,
     );
@@ -96,9 +97,11 @@ fn send_task_internal(
 ) -> anyhow::Result<()> {
     let info: DelegateInfo = load_delegate_info(employer)?;
     let cid = String::from_utf8(description_cid.to_vec())?;
+
+    let service_url = get_url(net_address)?;
     let request_url = format!(
         "{}{}/{}/{}/{}?content={}",
-        get_url(net_address),
+        service_url,
         SEND_ERRAND_TASK_ACTION,
         employer,
         String::from_utf8(errand_id.to_vec())?,
