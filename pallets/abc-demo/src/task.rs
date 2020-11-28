@@ -36,6 +36,10 @@ fn fetch_errand_result_info(
     let resp_str = String::from_utf8(resp_bytes)?;
     let result_info: ErrandResultInfo = serde_json::from_str::<ErrandResultInfo>(&resp_str)
         .map_err(|e| AbcError::Common(format!("{}", e)))?;
+    if result_info.completed != true {
+        debug::info!("errand is not completed");
+        return Ok(true)
+    }
 
     let key = LOCAL_STORAGE_TASKS_RESULTS_KEY.as_bytes().to_vec();
     let lock_key = LOCAL_STORAGE_TASKS_RESULTS_LOCK.as_bytes().to_vec();
