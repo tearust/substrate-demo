@@ -220,7 +220,7 @@ decl_module! {
 
             // reserve fee for commit errand delegator
             ensure!(fee > 0, Error::<T>::InsufficientFee);
-            T::Currency::reserve(&sender, fee.into())?;
+            T::Currency::reserve(&employer, fee.into())?;
             EmployerDelegateFee::<T>::insert(&employer, fee);
 
             let block_number = frame_system::Module::<T>::block_number();
@@ -289,14 +289,14 @@ decl_module! {
                 task_array.push(task_info);
                 // reserve fee for commit errand delegator
                 ensure!(fee > 0, Error::<T>::InsufficientFee);
-                T::Currency::reserve(&sender, fee.into())?;
+                T::Currency::reserve(&employer, fee.into())?;
                 EmployerTaskFee::<T>::insert(&employer, fee);
 
                 Tasks::<T>::insert(&block_number, task_array);
             } else {
                 // reserve fee for commit errand delegator
                 ensure!(fee > 0, Error::<T>::InsufficientFee);
-                T::Currency::reserve(&sender, fee.into())?;
+                T::Currency::reserve(&employer, fee.into())?;
                 EmployerTaskFee::<T>::insert(&employer, fee);
 
                 Tasks::<T>::insert(&block_number, vec![task_info]);
@@ -421,7 +421,7 @@ impl<T: Trait> Module<T> {
             if let Err(e) = Self::apply_single_delegate(&acc.0) {
                 debug::error!("apply_single_delegate error: {:?}", e);
                 // revert changes
-                T::Currency::unreserve(&sender, fee.into());
+                T::Currency::unreserve(&acc.0, fee.into());
                 Employers::<T>::remove(&acc.0);
                 EmployerSender::<T>::remove(&acc.0);
                 EmployerNetAddress::<T>::remove(&acc.0);
@@ -495,7 +495,7 @@ impl<T: Trait> Module<T> {
                                 &item.errand_id,
                                 &net_address,
                             ) {
-                                T::Currency::unreserve(&sender, fee.into());
+                                T::Currency::unreserve(&employer, fee.into());
                                 continue;
                             }
                         }
@@ -512,11 +512,10 @@ impl<T: Trait> Module<T> {
                                 &item.description_cid,
                                 &item.errand_id,
                             ) {
-                                T::Currency::unreserve(&sender, fee.into());
+                                T::Currency::unreserve(&employer, fee.into());
                             }
                         }
                         Err(e) => {
-                            T::Currency::unreserve(&sender, fee.into());
                             debug::error!("decode account id error: {:?}", e)
                         }
                     }
