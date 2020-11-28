@@ -1,14 +1,15 @@
-use crate::*;
 use super::*;
+use crate::*;
 use frame_support::{impl_outer_origin, parameter_types, weights::Weight};
 use frame_system as system;
-use sp_core::H256;
-use sp_runtime::{testing::{Header, TestXt}, traits::{
-    BlakeTwo256, IdentityLookup, Extrinsic as ExtrinsicT,
-    IdentifyAccount, Verify,
-}, Perbill, MultiSignature};
 use pallet_balances;
 use sp_core::crypto::Ss58Codec;
+use sp_core::H256;
+use sp_runtime::{
+    testing::{Header, TestXt},
+    traits::{BlakeTwo256, Extrinsic as ExtrinsicT, IdentifyAccount, IdentityLookup, Verify},
+    MultiSignature, Perbill,
+};
 
 impl_outer_origin! {
     pub enum Origin for Test {}
@@ -65,6 +66,7 @@ impl pallet_balances::Trait for Test {
 }
 
 impl Trait for Test {
+    type Currency = pallet_balances::Module<Test>;
     type Event = ();
     type AuthorityId = crypto::AuthId;
     type Call = Call<Test>;
@@ -72,7 +74,6 @@ impl Trait for Test {
 
 pub type System = system::Module<Test>;
 pub type TemplateModule = Module<Test>;
-
 
 type Extrinsic = TestXt<Call<Test>, ()>;
 type Signature = MultiSignature;
@@ -83,14 +84,16 @@ impl frame_system::offchain::SigningTypes for Test {
     type Signature = Signature;
 }
 
-impl<LocalCall> frame_system::offchain::SendTransactionTypes<LocalCall> for Test where
+impl<LocalCall> frame_system::offchain::SendTransactionTypes<LocalCall> for Test
+where
     Call<Test>: From<LocalCall>,
 {
     type OverarchingCall = Call<Test>;
     type Extrinsic = Extrinsic;
 }
 
-impl<LocalCall> frame_system::offchain::CreateSignedTransaction<LocalCall> for Test where
+impl<LocalCall> frame_system::offchain::CreateSignedTransaction<LocalCall> for Test
+where
     Call<Test>: From<LocalCall>,
 {
     fn create_transaction<C: frame_system::offchain::AppCrypto<Self::Public, Self::Signature>>(
@@ -104,9 +107,9 @@ impl<LocalCall> frame_system::offchain::CreateSignedTransaction<LocalCall> for T
 }
 
 parameter_types! {
-	pub const GracePeriod: u64 = 5;
-	pub const UnsignedInterval: u64 = 128;
-	pub const UnsignedPriority: u64 = 1 << 20;
+    pub const GracePeriod: u64 = 5;
+    pub const UnsignedInterval: u64 = 128;
+    pub const UnsignedPriority: u64 = 1 << 20;
 }
 
 // Build genesis storage according to the mock runtime.
@@ -115,12 +118,22 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
         .build_storage::<Test>()
         .unwrap();
 
-    let _ = pallet_balances::GenesisConfig::<Test>{
+    let _ = pallet_balances::GenesisConfig::<Test> {
         balances: vec![
-            (AccountId32::from_string("5G97JLuuT1opraWvfS6Smt4jaAZuyDquP9GjamKVcPC366qU").unwrap(), 1000),
-            (AccountId32::from_string("5EPhGXBymJfrcvT2apo6E9tAm2xpNf8Y77zLxd4zjCBdVJeS").unwrap(), 2000),
+            (
+                AccountId32::from_string("5G97JLuuT1opraWvfS6Smt4jaAZuyDquP9GjamKVcPC366qU")
+                    .unwrap(),
+                1000,
+            ),
+            (
+                AccountId32::from_string("5EPhGXBymJfrcvT2apo6E9tAm2xpNf8Y77zLxd4zjCBdVJeS")
+                    .unwrap(),
+                2000,
+            ),
         ],
-    }.assimilate_storage(&mut t).unwrap();
+    }
+    .assimilate_storage(&mut t)
+    .unwrap();
 
     t.into()
 }

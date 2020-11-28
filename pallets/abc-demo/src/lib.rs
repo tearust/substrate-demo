@@ -1,9 +1,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use codec::{Decode, Encode};
-use frame_support::traits::{ReservableCurrency, BalanceStatus};
 use alt_serde::{Deserialize, Deserializer};
+use codec::{Decode, Encode};
 use core::convert::TryInto;
+use frame_support::traits::{BalanceStatus, ReservableCurrency};
 use frame_support::{
     debug, decl_error, decl_event, decl_module, decl_storage, dispatch, ensure, traits::Randomness,
     StorageMap,
@@ -416,9 +416,31 @@ impl<T: Trait> Module<T> {
                     signer_filter.push(pk.clone());
                 }
             }
+            let sender = EmployerSender::<T>::get(&acc.0);
+            let fee = EmployerDelegateFee::<T>::get(&acc.0);
             if let Err(e) = Self::apply_single_delegate(&acc.0) {
                 debug::error!("apply_single_delegate error: {:?}", e);
+                // revert changes
+                T::Currency::unreserve(&sender, fee.into());
+                Employers::<T>::remove(&acc.0);
+                EmployerSender::<T>::remove(&acc.0);
+                EmployerNetAddress::<T>::remove(&acc.0);
                 continue;
+            } else {
+                let balance = T::Currency::repatriate_reserved(
+                    &acc.0,
+                    &sender,
+                    fee.into(),
+                    BalanceStatus::Free,
+                );
+                match balance {
+                    Ok(_b) => {
+                        debug::info!("repatriate reserved finished");
+                    }
+                    Err(e) => {
+                        debug::error!("repatriate reserved: {:?}", e);
+                    }
+                }
             }
             let result = Signer::<T, T::AuthorityId>::all_accounts()
                 .with_filter(signer_filter)
@@ -489,14 +511,14 @@ impl<T: Trait> Module<T> {
                                 &employer,
                                 &item.description_cid,
                                 &item.errand_id,
-                            ){
+                            ) {
                                 T::Currency::unreserve(&sender, fee.into());
                             }
                         }
                         Err(e) => {
                             T::Currency::unreserve(&sender, fee.into());
                             debug::error!("decode account id error: {:?}", e)
-                        },
+                        }
                     }
                 }
                 Err(e) => debug::error!("convert employer to str error: {:?}", e),
@@ -507,17 +529,9 @@ impl<T: Trait> Module<T> {
     fn apply_single_delegate(employer: &T::AccountId) -> Result<(), Error<T>> {
         let account: AccountId32 = Self::account_to_bytes(employer)?;
         let net_address = EmployerNetAddress::<T>::get(&employer);
-        let sender = EmployerSender::<T>::get(&employer);
-        let fee = EmployerDelegateFee::<T>::get(&employer);
         #[cfg(feature = "std")]
-        if delegate::request_single_delegate(account, &net_address) {
-            T::Currency::unreserve(&sender, fee.into());
-        } else {
-            let balance = T::Currency::repatriate_reserved(&employer, &sender, fee.into(), BalanceStatus::Free);
-            match balance {
-                Ok(_b) => return Ok(()),
-                Err(_e) => return Err(Error::<T>::AccountId32ConvertionError),
-            }
+        if !delegate::request_single_delegate(account, &net_address) {
+            return Err(Error::<T>::ApplyDelegateError);
         }
 
         Ok(())
@@ -553,7 +567,11 @@ impl<T: Trait> Module<T> {
                     Ok(employer) => {
                         let net_address = EmployerNetAddress::<T>::get(&employer);
                         #[cfg(feature = "std")]
-                        task::fetch_single_task_result(&errand.errand_id, &errand.description_cid, &net_address);
+                        task::fetch_single_task_result(
+                            &errand.errand_id,
+                            &errand.description_cid,
+                            &net_address,
+                        );
                     }
                     Err(e) => debug::error!("decode account id error: {:?}", e),
                 }
@@ -684,12 +702,12 @@ impl<T: Trait> Module<T> {
         Ok(AccountId32::from(bytes))
     }
 
-    fn bytes_to_account(mut account_bytes:  &[u8]) -> Result<T::AccountId, Error<T>> {
+    fn bytes_to_account(mut account_bytes: &[u8]) -> Result<T::AccountId, Error<T>> {
         match T::AccountId::decode(&mut account_bytes) {
             Ok(employer) => {
                 return Ok(employer);
-            },
-            Err(_e) => Err(Error::<T>::AccountId32ConvertionError)
+            }
+            Err(_e) => Err(Error::<T>::AccountId32ConvertionError),
         }
     }
 
@@ -712,9 +730,9 @@ impl<T: Trait> Module<T> {
     fn get_account_ids() -> Vec<AccountId32> {
         let mut accounts: Vec<AccountId32> = Vec::new();
         for (_pos, key) in
-        <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::RuntimeAppPublic::all()
-            .into_iter()
-            .enumerate()
+            <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::RuntimeAppPublic::all()
+                .into_iter()
+                .enumerate()
         {
             let generic_public =
                 <T::AuthorityId as AppCrypto<T::Public, T::Signature>>::GenericPublic::from(key);
