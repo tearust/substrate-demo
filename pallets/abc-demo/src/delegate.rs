@@ -39,7 +39,7 @@ pub fn get_url(net_address: &NetAddress) -> String {
     url
 }
 
-pub fn request_single_delegate(account: AccountId32, net_address: &NetAddress) {
+pub fn request_single_delegate(account: AccountId32, net_address: &NetAddress) -> bool {
     let employer = format!("{}", account);
     let proto_msg = actor_delegate_proto::BeMyDelegateRequest {
         layer1_account: employer.clone(),
@@ -58,13 +58,21 @@ pub fn request_single_delegate(account: AccountId32, net_address: &NetAddress) {
                 Ok(resp) => {
                     if let Err(e) = parse_delegate_response(resp, &employer) {
                         debug::error!("parse delegate response failed: {}", e)
+                        return false;
                     }
                 }
-                Err(e) => debug::error!("delegate request failed: {}", e),
+                Err(e) => {
+                    debug::error!("delegate request failed: {}", e);
+                    return false;
+                },
             }
         }
-        Err(e) => debug::error!("encode protobuf failed: {}", e),
+        Err(e) => {
+            debug::error!("encode protobuf failed: {}", e);
+            return false;
+        },
     }
+    true
 }
 
 fn parse_delegate_response(resp: Vec<u8>, employer: &str) -> anyhow::Result<()> {
