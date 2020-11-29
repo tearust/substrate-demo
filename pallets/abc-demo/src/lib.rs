@@ -369,6 +369,17 @@ decl_module! {
             Ok(())
         }
 
+        #[weight = 10_000]
+        fn unreserve(origin,
+            employer: T::AccountId,
+            fee: u32,
+            ) {
+            T::Currency::unreserve(&employer, fee.into());
+            Employers::<T>::remove(&employer);
+            EmployerSender::<T>::remove(&employer);
+            EmployerNetAddress::<T>::remove(&employer);
+        }
+
         fn offchain_worker(block_number: T::BlockNumber) {
             debug::info!("Entering off-chain workers");
 
@@ -416,15 +427,19 @@ impl<T: Trait> Module<T> {
                     signer_filter.push(pk.clone());
                 }
             }
+            if signer_filter.len() == 0 {
+                continue;
+            }
             let sender = EmployerSender::<T>::get(&acc.0);
             let fee = EmployerDelegateFee::<T>::get(&acc.0);
             if let Err(e) = Self::apply_single_delegate(&acc.0) {
                 debug::error!("apply_single_delegate error: {:?}", e);
                 // revert changes
-                T::Currency::unreserve(&acc.0, fee.into());
-                Employers::<T>::remove(&acc.0);
-                EmployerSender::<T>::remove(&acc.0);
-                EmployerNetAddress::<T>::remove(&acc.0);
+                Signer::<T, T::AuthorityId>::all_accounts()
+                    .with_filter(signer_filter)
+                    .send_signed_transaction(|_acct| {
+                        Call::unreserve(acc.0.clone(), fee.into())
+                    });
                 continue;
             } else {
                 let balance = T::Currency::repatriate_reserved(
@@ -515,9 +530,7 @@ impl<T: Trait> Module<T> {
                                 T::Currency::unreserve(&employer, fee.into());
                             }
                         }
-                        Err(e) => {
-                            debug::error!("decode account id error: {:?}", e)
-                        }
+                        Err(e) => debug::error!("decode account id error: {:?}", e),
                     }
                 }
                 Err(e) => debug::error!("convert employer to str error: {:?}", e),
