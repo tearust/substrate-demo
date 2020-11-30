@@ -3,7 +3,7 @@
 set -e
 
 echo "*** Start building substrate demo ***"
-
+mkdir -p docker/.local
 cd $(dirname ${BASH_SOURCE[0]})/..
 
 docker-compose down --remove-orphans
