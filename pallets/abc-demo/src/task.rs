@@ -79,8 +79,8 @@ pub fn send_task_to_tea_network(
     errand_id: &ErrandId,
     net_address: &NetAddress,
 ) -> bool {
-    let employer = format!("{}", account);
-    match send_task_internal(&employer, description_cid, errand_id, net_address) {
+    let client = format!("{}", account);
+    match send_task_internal(&client, description_cid, errand_id, net_address) {
         Ok(_) => true,
         Err(e) => {
             debug::error!("send_task_to_tea_network got error: {}", e);
@@ -90,12 +90,12 @@ pub fn send_task_to_tea_network(
 }
 
 fn send_task_internal(
-    employer: &str,
+    client: &str,
     description_cid: &Cid,
     errand_id: &ErrandId,
     net_address: &NetAddress,
 ) -> anyhow::Result<()> {
-    let info: DelegateInfo = load_delegate_info(employer)?;
+    let info: DelegateInfo = load_delegate_info(client)?;
     let cid = String::from_utf8(description_cid.to_vec())?;
 
     let service_url = get_url(net_address)?;
@@ -103,7 +103,7 @@ fn send_task_internal(
         "{}{}/{}/{}/{}?content={}",
         service_url,
         SEND_ERRAND_TASK_ACTION,
-        employer,
+        client,
         String::from_utf8(errand_id.to_vec())?,
         &hex::encode(info.sig),
         &cid,
@@ -112,8 +112,8 @@ fn send_task_internal(
     let res = http_post(&request_url)?;
 
     debug::info!(
-        "employer {} send task (cid {}) go response: {}",
-        employer,
+        "client {} send task (cid {}) go response: {}",
+        client,
         cid,
         String::from_utf8(res)?
     );

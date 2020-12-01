@@ -4,12 +4,12 @@
   "ErrandId": "Bytes",
   "Cid": "Bytes",
   "NetAddress": "Bytes",
-  "EmployerAccountId": "Bytes",
+  "ClientAccountId": "Bytes",
   "ErrandStatus": {
     "_enum": ["Precessing", "Done"]
   },
   "Errand": {
-    "AccountId": "EmployerAccountId",
+    "AccountId": "ClientAccountId",
     "ErrandId": "ErrandId",
     "DescriptionCid": "Cid",
     "Status": "ErrandStatus",
