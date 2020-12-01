@@ -8,8 +8,8 @@ use sp_core::crypto::AccountId32;
 
 const APPLY_DELEGATE: &'static str = "/api/be_my_delegate";
 
-const LOCAL_STORAGE_EMPLOYER_KEY_PREFIX: &'static str = "local-storage::employer-";
-const LOCAL_STORAGE_EMPLOYER_LOCK_PREFIX: &'static str = "local-storage::employer-lock-";
+const LOCAL_STORAGE_CLIENT_KEY_PREFIX: &'static str = "local-storage::client-";
+const LOCAL_STORAGE_CLIENT_LOCK_PREFIX: &'static str = "local-storage::client-lock-";
 
 mod actor_delegate_proto {
     include!(concat!(env!("OUT_DIR"), "/actor_delegate.rs"));
@@ -45,9 +45,9 @@ pub fn get_url(net_address: &NetAddress) -> anyhow::Result<String> {
 }
 
 pub fn request_single_delegate(account: AccountId32, net_address: &NetAddress) -> bool {
-    let employer = format!("{}", account);
+    let client = format!("{}", account);
     let proto_msg = actor_delegate_proto::BeMyDelegateRequest {
-        layer1_account: employer.clone(),
+        layer1_account: client.clone(),
         // todo generate a nonce value
         nonce: Vec::<u8>::new(),
     };
@@ -67,7 +67,7 @@ pub fn request_single_delegate(account: AccountId32, net_address: &NetAddress) -
 
             match crate::http::http_post(&request_url) {
                 Ok(resp) => {
-                    if let Err(e) = parse_delegate_response(resp, &employer) {
+                    if let Err(e) = parse_delegate_response(resp, &client) {
                         debug::error!("parse delegate response: {}", e);
                         return false;
                     }
@@ -86,20 +86,20 @@ pub fn request_single_delegate(account: AccountId32, net_address: &NetAddress) -
     true
 }
 
-fn parse_delegate_response(resp: Vec<u8>, employer: &str) -> anyhow::Result<()> {
+fn parse_delegate_response(resp: Vec<u8>, client: &str) -> anyhow::Result<()> {
     let resp_str = String::from_utf8(resp)?;
     let result_info: DelegateInfo = serde_json::from_str::<DelegateInfo>(&resp_str)
         .map_err(|e| AbcError::Common(format!("{}", e)))?;
 
-    save_delegate_info(employer, &result_info)
+    save_delegate_info(client, &result_info)
 }
 
-fn save_delegate_info(employer: &str, delegate_info: &DelegateInfo) -> anyhow::Result<()> {
-    let key = [LOCAL_STORAGE_EMPLOYER_KEY_PREFIX, employer]
+fn save_delegate_info(client: &str, delegate_info: &DelegateInfo) -> anyhow::Result<()> {
+    let key = [LOCAL_STORAGE_CLIENT_KEY_PREFIX, client]
         .concat()
         .as_bytes()
         .to_vec();
-    let lock_key = [LOCAL_STORAGE_EMPLOYER_LOCK_PREFIX, employer]
+    let lock_key = [LOCAL_STORAGE_CLIENT_LOCK_PREFIX, client]
         .concat()
         .as_bytes()
         .to_vec();
@@ -109,12 +109,12 @@ fn save_delegate_info(employer: &str, delegate_info: &DelegateInfo) -> anyhow::R
     })
 }
 
-pub fn load_delegate_info(employer: &str) -> anyhow::Result<DelegateInfo> {
-    let key = [LOCAL_STORAGE_EMPLOYER_KEY_PREFIX, employer]
+pub fn load_delegate_info(client: &str) -> anyhow::Result<DelegateInfo> {
+    let key = [LOCAL_STORAGE_CLIENT_KEY_PREFIX, client]
         .concat()
         .as_bytes()
         .to_vec();
-    let lock_key = [LOCAL_STORAGE_EMPLOYER_LOCK_PREFIX, employer]
+    let lock_key = [LOCAL_STORAGE_CLIENT_LOCK_PREFIX, client]
         .concat()
         .as_bytes()
         .to_vec();
@@ -122,7 +122,7 @@ pub fn load_delegate_info(employer: &str) -> anyhow::Result<DelegateInfo> {
         Ok(Some(Some(info))) => Ok(info),
         Err(e) => Err(anyhow::anyhow!(
             "get local storage about {} error, details: {}",
-            employer,
+            client,
             e
         )),
         _ => Err(anyhow::anyhow!("get local storage about {} error")),

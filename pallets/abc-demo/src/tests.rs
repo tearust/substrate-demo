@@ -35,21 +35,21 @@ fn begin_task_works() {
         let fee = 5u32;
         let sender = Origin::signed(AccountId32::from_string(ACCOUNT1).unwrap());
         let sender_account = AccountId32::from_string(ACCOUNT1).unwrap();
-        let employer_account = AccountId32::from_string(ACCOUNT2).unwrap();
+        let client_account = AccountId32::from_string(ACCOUNT2).unwrap();
         assert_ok!(TemplateModule::request_delegate(
             sender.clone(),
-            employer_account.clone(),
+            client_account.clone(),
             vec![0u8],
             fee.into()
         ));
         assert_ok!(TemplateModule::update_delegate_status(
             sender.clone(),
-            employer_account.clone(),
+            client_account.clone(),
             sender_account.clone()
         ));
         assert_ok!(TemplateModule::begin_task(
             sender.clone(),
-            employer_account.clone(),
+            client_account.clone(),
             cid.clone(),
             fee
         ));
@@ -57,8 +57,8 @@ fn begin_task_works() {
         let task_array = Tasks::<Test>::get(&block_number);
         let mut sender_bytes = [0u8; 32];
         sender_bytes.copy_from_slice(task_array[0].sender.as_slice());
-        let mut employer_bytes = [0u8; 32];
-        employer_bytes.copy_from_slice(task_array[0].employer.as_slice());
+        let mut client_bytes = [0u8; 32];
+        client_bytes.copy_from_slice(task_array[0].client.as_slice());
         assert_eq!(1, task_array.len());
         assert_eq!(
             &AccountId32::from_string(ACCOUNT1).unwrap(),
@@ -66,7 +66,7 @@ fn begin_task_works() {
         );
         assert_eq!(
             &AccountId32::from_string(ACCOUNT2).unwrap(),
-            &AccountId32::from(employer_bytes)
+            &AccountId32::from(client_bytes)
         );
         assert_eq!(&fee, &task_array[0].fee);
 
@@ -74,7 +74,7 @@ fn begin_task_works() {
         let cid = vec![1u8, 2u8];
         assert_ok!(TemplateModule::begin_task(
             sender.clone(),
-            employer_account.clone(),
+            client_account.clone(),
             cid.clone(),
             fee
         ));
@@ -89,7 +89,7 @@ fn begin_task_works() {
         // add the same task as above
         assert_ok!(TemplateModule::begin_task(
             sender.clone(),
-            employer_account.clone(),
+            client_account.clone(),
             cid.clone(),
             fee
         ));
@@ -107,7 +107,7 @@ fn begin_task_works() {
         let errand_id = vec![3u8, 4u8];
         assert_ok!(TemplateModule::init_errand(
             sender.clone(),
-            employer_account.clone(),
+            client_account.clone(),
             errand_id.clone(),
             cid.clone()
         ));
