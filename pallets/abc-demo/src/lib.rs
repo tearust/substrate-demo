@@ -167,12 +167,15 @@ decl_storage! {
         ProcessingErrands get(fn processing_errands): Vec<Cid>;
 
         DevelopmentMode get(fn chain_type): bool;
+        UpdateResultAccounts get(fn poa_account): Vec<AccountId32>
     }
 
     add_extra_genesis {
         config(development_mode): bool;
+        config(update_result_accounts): Vec<AccountId32>;
         build(|config: &GenesisConfig| {
             DevelopmentMode::put(config.development_mode);
+            UpdateResultAccounts::put(&config.update_result_accounts);
         })
     }
 }
