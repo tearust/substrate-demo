@@ -64,6 +64,9 @@ pub fn development_config() -> Result<ChainSpec, String> {
 			],
 			true,
             true,
+			vec![
+				get_account_id_from_seed::<sr25519::Public>("Alice"),
+			],
         ),
 		// Bootnodes
 		vec![],
@@ -116,6 +119,12 @@ pub fn local_testnet_config() -> Result<ChainSpec, String> {
 			],
 			true,
             false,
+            vec![
+                get_account_id_from_seed::<sr25519::Public>("Alice"),
+                get_account_id_from_seed::<sr25519::Public>("Bob"),
+                get_account_id_from_seed::<sr25519::Public>("Charlie"),
+                get_account_id_from_seed::<sr25519::Public>("Dave"),
+            ],
         ),
 		// Bootnodes
 		vec![],
@@ -138,6 +147,7 @@ fn testnet_genesis(
 	endowed_accounts: Vec<AccountId>,
 	_enable_println: bool,
     dev_mode: bool,
+    accounts: Vec<AccountId>
 ) -> GenesisConfig {
 	GenesisConfig {
 		frame_system: Some(SystemConfig {
@@ -161,6 +171,7 @@ fn testnet_genesis(
 		}),
         pallet_abc: Some(AbcConfig {
             development_mode: dev_mode,
+            update_result_accounts: accounts
         }),
 	}
 }
