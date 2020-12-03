@@ -154,6 +154,9 @@ decl_storage! {
         ClientNetAddress get(fn client_net_address):
             map hasher(blake2_128_concat) T::AccountId => NetAddress;
 
+        ClientDelegator get(fn client_delegator):
+            map hasher(blake2_128_concat) T::AccountId => T::AccountId;
+
         Tasks get(fn tasks):
             map hasher(blake2_128_concat) T::BlockNumber => Vec<TaskInfo>;
 
@@ -171,7 +174,7 @@ decl_event!(
     {
         DelegateRequested(AccountId, AccountId),
         DelegateUpdated(AccountId),
-        TaskBegined(AccountId, Vec<u8>, AccountId),
+        TaskBegan(AccountId, Vec<u8>, AccountId),
         ErrandInited(AccountId, Vec<u8>),
         ErrandUpdated(Vec<u8>, Vec<u8>),
     }
@@ -194,6 +197,7 @@ decl_error! {
         ClientNotExist,
         ClientNotReady,
         ClientSenderNotExist,
+        ClientDelegatorNotExist,
         NoRightToUpdateDelegate,
         NoRightToInitErrand,
         NoRightToUpdateErrand,
@@ -211,6 +215,7 @@ decl_module! {
         #[weight = 10_000]
         pub fn request_delegate(origin,
             client: T::AccountId,
+            delegator: T::AccountId,
             net_address: NetAddress,
             fee: u32,
         ) -> dispatch::DispatchResult {
@@ -234,6 +239,7 @@ decl_module! {
             Clients::<T>::insert(&client, false);
             ClientSender::<T>::insert(&client, &sender);
             ClientNetAddress::<T>::insert(&client, net_address);
+            ClientDelegator::<T>::insert(&client, &delegator);
 
             Self::deposit_event(RawEvent::DelegateRequested(client, sender));
             Ok(())
@@ -269,6 +275,7 @@ decl_module! {
             ensure!(!Errands::contains_key(&description_cid), Error::<T>::ErrandAlreadyExecuted);
             ensure!(ClientSender::<T>::contains_key(&client), Error::<T>::ClientSenderNotExist);
             ensure!(sender == ClientSender::<T>::get(&client), Error::<T>::ClientSenderNotExist);
+            ensure!(ClientDelegator::<T>::contains_key(&client), Error::<T>::ClientDelegatorNotExist);
 
             let errand_id = Self::generate_errand_id(&sender);
             let task_info = TaskInfo {
@@ -302,7 +309,7 @@ decl_module! {
                 Tasks::<T>::insert(&block_number, vec![task_info]);
             }
 
-            Self::deposit_event(RawEvent::TaskBegined(client, description_cid, sender));
+            Self::deposit_event(RawEvent::TaskBegan(client, description_cid, sender));
             Ok(())
         }
 
@@ -437,9 +444,7 @@ impl<T: Trait> Module<T> {
                 // revert changes
                 Signer::<T, T::AuthorityId>::all_accounts()
                     .with_filter(signer_filter)
-                    .send_signed_transaction(|_acct| {
-                        Call::unreserve(acc.0.clone(), fee.into())
-                    });
+                    .send_signed_transaction(|_acct| Call::unreserve(acc.0.clone(), fee.into()));
                 continue;
             } else {
                 let balance = T::Currency::repatriate_reserved(
@@ -500,7 +505,8 @@ impl<T: Trait> Module<T> {
                         continue;
                     }
 
-                    match Self::account_to_bytes(&client) {
+                    let delegator = ClientDelegator::<T>::get(&client);
+                    match Self::account_to_bytes(&delegator) {
                         Ok(account) => {
                             let net_address = ClientNetAddress::<T>::get(&client);
                             #[cfg(feature = "std")]
@@ -539,8 +545,9 @@ impl<T: Trait> Module<T> {
     }
 
     fn apply_single_delegate(client: &T::AccountId) -> Result<(), Error<T>> {
-        let account: AccountId32 = Self::account_to_bytes(client)?;
         let net_address = ClientNetAddress::<T>::get(&client);
+        let delegator = ClientDelegator::<T>::get(&client);
+        let account: AccountId32 = Self::account_to_bytes(&delegator)?;
         #[cfg(feature = "std")]
         if !delegate::request_single_delegate(account, &net_address) {
             return Err(Error::<T>::ApplyDelegateError);
