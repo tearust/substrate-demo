@@ -44,7 +44,6 @@ fn begin_task_works() {
         ));
         assert_ok!(TemplateModule::update_delegate_status(
             sender.clone(),
-            client_account.clone(),
             sender_account.clone()
         ));
         assert_ok!(TemplateModule::begin_task(

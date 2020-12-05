@@ -125,7 +125,7 @@ pub fn load_delegate_info(client: &str) -> anyhow::Result<DelegateInfo> {
             client,
             e
         )),
-        _ => Err(anyhow::anyhow!("get local storage about {} error")),
+        _ => Err(anyhow::anyhow!("get local storage about {} error", client)),
     }
 }
 
