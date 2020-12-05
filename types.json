@@ -5,6 +5,7 @@
   "Cid": "Bytes",
   "NetAddress": "Bytes",
   "ClientAccountId": "Bytes",
+  "DelegatorName": "Bytes",
   "ErrandStatus": {
     "_enum": ["Precessing", "Done"]
   },
