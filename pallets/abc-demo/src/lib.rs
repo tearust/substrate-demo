@@ -47,6 +47,8 @@ pub const TEA_SEND_TASK_TIMEOUT_PERIOD: u64 = 3000;
 pub const LOCAL_STORAGE_TASKS_RESULTS_KEY: &'static str = "local-storage::tasks_results";
 pub const LOCAL_STORAGE_TASKS_RESULTS_LOCK: &'static str = "local-storage::tasks_results-lock";
 
+pub const MIN_UPDATE_RESULT_ACCOUNT: usize = 2;
+
 #[serde(crate = "alt_serde")]
 #[derive(Encode, Decode, Deserialize, Clone)]
 struct ErrandResultInfo {
@@ -143,6 +145,9 @@ decl_storage! {
 
         Delegates get(fn delegates): map hasher(blake2_128_concat) T::AccountId => bool;
 
+        CompletedErrands get(fn completed_errands):
+            map hasher(twox_64_concat) Cid => Vec<T::AccountId>;
+
         RequestDelegateFee get(fn request_delegate_fee):
             map hasher(blake2_128_concat) T::AccountId => u32;
 
@@ -203,6 +208,7 @@ decl_error! {
         ResponseParsingError,
         ErrandAlreadyExecuted,
         ErrandTaskNotExist,
+        ErrandTaskCompleted,
         ErrandItemIsNone,
         ProcessingErrandNotExist,
         ApplyDelegateError,
@@ -358,31 +364,32 @@ decl_module! {
             let sender_account: AccountId32 = Self::account_to_bytes(&sender)?;
             let accounts: Vec<AccountId32> = vec![sender_account];
 
-            #[cfg(feature = "std")]
-            ensure!(task::account_from_seed_in_accounts("Alice", accounts), Error::<T>::NoRightToUpdateErrand);
-
-            Errands::mutate(&description_cid, |val| {
-                if let Some(errand) = val {
-                    errand.status = ErrandStatus::Done;
-                    errand.result = result.clone();
-                }
-            });
-            Self::remove_processing(&description_cid);
-
-            if let Some(errand) = Errands::get(&description_cid) {
-                let client = Self::bytes_to_account(&mut errand.account_id.as_slice())?;
-                let delegator = ClientDelegate::<T>::get(&client);
-                let fee = ClientTaskFee::<T>::get(&client);
-                let balance = T::Currency::repatriate_reserved(&client, &delegator, fee.into(), BalanceStatus::Free);
-                match balance {
-                    Ok(_b) => {debug::info!("repatriate reserved succeed");},
-                    Err(_e) => {debug::error!("failed to repatriate reserved wiith cid: {:?}", description_cid);},
-                }
+            ensure!(Self::allow_to_update_result(accounts), Error::<T>::NoRightToUpdateErrand);
+            if DevelopmentMode::get() {
+                Self::update_errand_result(description_cid.clone(), result.clone());
+                Self::deposit_event(RawEvent::ErrandUpdated(description_cid, result));
             } else {
-                debug::error!("found empty errand with cid: {:?}", description_cid);
+                // add result into completed_errands.
+                if CompletedErrands::<T>::contains_key(&description_cid) {
+                    let mut errand_array = CompletedErrands::<T>::take(&description_cid);
+                    errand_array.push(sender.clone());
+                    CompletedErrands::<T>::insert(&description_cid, errand_array);
+                } else {
+                    CompletedErrands::<T>::insert(&description_cid, vec![sender.clone()]);
+                }
+
+                // ensure the errand is not completed.
+                if let Some(errand) = Errands::get(&description_cid.clone()) {
+                    ensure!(errand.status == ErrandStatus::Processing, Error::<T>::ErrandTaskCompleted);
+                }
+
+                // if the results reached MIN_UPDATE_RESULT_ACCOUNT, we need to update_errand_result.
+                if CompletedErrands::<T>::get(&description_cid).len() >= MIN_UPDATE_RESULT_ACCOUNT {
+                    Self::update_errand_result(description_cid.clone(), result.clone());
+                    Self::deposit_event(RawEvent::ErrandUpdated(description_cid, result));
+                }
             }
 
-            Self::deposit_event(RawEvent::ErrandUpdated(description_cid, result));
             Ok(())
         }
 
@@ -584,10 +591,9 @@ impl<T: Trait> Module<T> {
             debug::info!("No local account available when query errand task results");
             return;
         }
-        let accounts: Vec<AccountId32> = Self::get_account_ids();
 
-        #[cfg(feature = "std")]
-        if !task::account_from_seed_in_accounts("Alice", accounts) {
+        let accounts: Vec<AccountId32> = Self::get_account_ids();
+        if !Self::allow_to_update_result(accounts) {
             return;
         }
 
@@ -626,9 +632,7 @@ impl<T: Trait> Module<T> {
         }
 
         let accounts: Vec<AccountId32> = Self::get_account_ids();
-
-        #[cfg(feature = "std")]
-        if !task::account_from_seed_in_accounts("Alice", accounts) {
+        if !Self::allow_to_update_result(accounts) {
             return;
         }
 
@@ -783,5 +787,60 @@ impl<T: Trait> Module<T> {
             }
         }
         return accounts;
+    }
+
+    fn allow_to_update_result(accounts: Vec<AccountId32>) -> bool {
+        for a in UpdateResultAccounts::get().iter() {
+            for i in accounts.iter() {
+                if a == i {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    fn update_errand_result(description_cid: Cid, result: Vec<u8>) {
+        Errands::mutate(&description_cid, |val| {
+            if let Some(errand) = val {
+                errand.status = ErrandStatus::Done;
+                errand.result = result.clone();
+            }
+        });
+        Self::remove_processing(&description_cid);
+        debug::info!("update errand result finished");
+
+        if let Some(errand) = Errands::get(&description_cid) {
+            let client = Self::bytes_to_account(&mut errand.account_id.as_slice());
+            match client {
+                Ok(c) => {
+                    let delegator = ClientDelegate::<T>::get(&c);
+                    let fee = ClientTaskFee::<T>::get(&c);
+                    let balance = T::Currency::repatriate_reserved(
+                        &c,
+                        &delegator,
+                        fee.into(),
+                        BalanceStatus::Free,
+                    );
+                    match balance {
+                        Ok(_b) => {
+                            debug::info!("repatriate reserved succeed");
+                        }
+                        Err(_e) => {
+                            debug::error!(
+                                "failed to repatriate reserved with cid: {:?}",
+                                description_cid
+                            );
+                        }
+                    }
+                }
+                Err(_e) => {
+                    debug::info!("failed to parse client");
+                }
+            }
+        } else {
+            debug::error!("found empty errand with cid: {:?}", description_cid);
+        }
     }
 }
