@@ -148,9 +148,6 @@ decl_storage! {
         CompletedErrands get(fn completed_errands):
             map hasher(twox_64_concat) Cid => Vec<T::AccountId>;
 
-        RequestDelegateFee get(fn request_delegate_fee):
-            map hasher(blake2_128_concat) T::AccountId => u32;
-
         ClientTaskFee get(fn client_task_fee):
             map hasher(blake2_128_concat) T::AccountId => u32;
 
@@ -234,16 +231,10 @@ decl_module! {
         pub fn request_delegate(origin,
             delegator_name: DelegatorName,
             net_address: NetAddress,
-            fee: u32,
         ) -> dispatch::DispatchResult {
             let sender = ensure_signed(origin)?;
 
             ensure!(!Delegates::<T>::contains_key(&sender), Error::<T>::ClientAlreadyExists);
-
-            // reserve fee for commit errand delegator
-            ensure!(fee > 0, Error::<T>::InsufficientFee);
-            T::Currency::reserve(&sender, fee.into())?;
-            RequestDelegateFee::<T>::insert(&sender, fee);
 
             let block_number = frame_system::Module::<T>::block_number();
             if DelegatesApplys::<T>::contains_key(&block_number) {
@@ -397,9 +388,7 @@ decl_module! {
         fn unreserve(origin,
             delegator_name: DelegatorName,
             client: T::AccountId,
-            fee: u32,
             ) {
-            T::Currency::unreserve(&client, fee.into());
             Delegates::<T>::remove(&client);
             ClientDelegate::<T>::remove(&client);
             let delegator = DelegateAccounts::<T>::get(&delegator_name);
@@ -460,7 +449,6 @@ impl<T: Trait> Module<T> {
             if signer_filter.len() == 0 {
                 continue;
             }
-            let fee = RequestDelegateFee::<T>::get(&acc.1);
 
             if let Err(e) = Self::apply_single_delegate(&acc.1) {
                 debug::error!("apply_single_delegate error: {:?}", e);
@@ -468,24 +456,9 @@ impl<T: Trait> Module<T> {
                 Signer::<T, T::AuthorityId>::all_accounts()
                     .with_filter(signer_filter)
                     .send_signed_transaction(|_acct| {
-                        Call::unreserve(acc.0.clone(), acc.1.clone(), fee.into())
+                        Call::unreserve(acc.0.clone(), acc.1.clone())
                     });
                 continue;
-            } else {
-                let balance = T::Currency::repatriate_reserved(
-                    &acc.1,
-                    &acc.1,
-                    fee.into(),
-                    BalanceStatus::Free,
-                );
-                match balance {
-                    Ok(_b) => {
-                        debug::info!("repatriate reserved finished");
-                    }
-                    Err(e) => {
-                        debug::error!("repatriate reserved: {:?}", e);
-                    }
-                }
             }
             let result = Signer::<T, T::AuthorityId>::all_accounts()
                 .with_filter(signer_filter)
@@ -520,7 +493,7 @@ impl<T: Trait> Module<T> {
             match T::AccountId::decode(&mut item.client.as_slice()) {
                 Ok(client) => {
                     let delegator = DelegateAccounts::<T>::get(&item.delegator);
-                    let fee = RequestDelegateFee::<T>::get(&client);
+                    let fee = ClientTaskFee::<T>::get(&client);
                     let mut signer_filter: Vec<T::Public> = Vec::new();
                     for (aid, pk) in account_ids.iter() {
                         if aid == &delegator {
