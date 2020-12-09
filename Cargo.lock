@@ -3447,6 +3447,7 @@ dependencies = [
  "parity-scale-codec",
  "prost",
  "prost-build",
+ "serde",
  "serde_json 1.0.44",
  "sp-core",
  "sp-io",

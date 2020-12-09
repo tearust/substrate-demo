@@ -165,6 +165,15 @@ decl_storage! {
             map hasher(blake2_128_concat) T::BlockNumber => Vec<(DelegatorName, T::AccountId)>;
 
         ProcessingErrands get(fn processing_errands): Vec<Cid>;
+
+        DevelopmentMode get(fn chain_type): bool;
+    }
+
+    add_extra_genesis {
+        config(development_mode): bool;
+        build(|config: &GenesisConfig| {
+            DevelopmentMode::put(config.development_mode);
+        })
     }
 }
 
