@@ -1,7 +1,7 @@
 use sp_core::{Pair, Public, sr25519};
 use node_template_runtime::{
-	AccountId, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig,
-	SudoConfig, SystemConfig, WASM_BINARY, Signature
+    AccountId, AbcConfig, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig,
+    SudoConfig, SystemConfig, WASM_BINARY, Signature
 };
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_finality_grandpa::AuthorityId as GrandpaId;
@@ -63,7 +63,8 @@ pub fn development_config() -> Result<ChainSpec, String> {
 				get_account_id_from_seed::<sr25519::Public>("Bob//stash"),
 			],
 			true,
-		),
+            true,
+        ),
 		// Bootnodes
 		vec![],
 		// Telemetry
@@ -78,7 +79,7 @@ pub fn development_config() -> Result<ChainSpec, String> {
 }
 
 pub fn local_testnet_config() -> Result<ChainSpec, String> {
-	let wasm_binary = WASM_BINARY.ok_or("Development wasm binary not available".to_string())?;
+    let wasm_binary = WASM_BINARY.ok_or("Development wasm binary not available".to_string())?;
 
 	Ok(ChainSpec::from_genesis(
 		// Name
@@ -114,7 +115,8 @@ pub fn local_testnet_config() -> Result<ChainSpec, String> {
 
 			],
 			true,
-		),
+            false,
+        ),
 		// Bootnodes
 		vec![],
 		// Telemetry
@@ -135,6 +137,7 @@ fn testnet_genesis(
 	root_key: AccountId,
 	endowed_accounts: Vec<AccountId>,
 	_enable_println: bool,
+    dev_mode: bool,
 ) -> GenesisConfig {
 	GenesisConfig {
 		frame_system: Some(SystemConfig {
@@ -156,5 +159,8 @@ fn testnet_genesis(
 			// Assign network admin rights.
 			key: root_key,
 		}),
+        pallet_abc: Some(AbcConfig {
+            development_mode: dev_mode,
+        }),
 	}
 }
